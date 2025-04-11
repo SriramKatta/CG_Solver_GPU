@@ -1,0 +1,6 @@
+CPMAddPackage(
+    NAME NVTX
+    GITHUB_REPOSITORY "NVIDIA/NVTX"
+    GIT_TAG "main"
+    GIT_SHALLOW ON
+)
