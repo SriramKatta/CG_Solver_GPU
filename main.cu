@@ -144,7 +144,7 @@ __global__ void dotproduct(const tpe *const __restrict__ a,
   }
   auto tid = threadIdx.y * blockDim.x + threadIdx.x;
   smem[tid] = sum;
-  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+  for (unsigned int s = (blockDim.x * blockDim.y) / 2; s > 0; s >>= 1) {
     __syncthreads();
     if (tid < s) {
       smem[tid] += smem[tid + s];
