@@ -1,5 +1,6 @@
 // V1 added prefetching to all kernls to page fault data transfer between cpu and gpu
 // V2 make everything grid stride loop
+// V3 made dot product reduction kernel and done all the computation on gpu
 #include "cg-util.h"
 
 #include "cuda-util.h"
@@ -96,6 +97,93 @@ __global__ void residual_initp(tpe *__restrict__ res, tpe *__restrict__ p,
   }
 }
 
+template <class T>
+struct SharedMemory {
+  __device__ inline operator T *() {
+    extern __shared__ int __smem[];
+    return (T *)__smem;
+  }
+
+  __device__ inline operator const T *() const {
+    extern __shared__ int __smem[];
+    return (T *)__smem;
+  }
+};
+
+// specialize for double to avoid unaligned memory
+// access compile errors
+template <>
+struct SharedMemory<double> {
+  __device__ inline operator double *() {
+    extern __shared__ double __smem_d[];
+    return (double *)__smem_d;
+  }
+
+  __device__ inline operator const double *() const {
+    extern __shared__ double __smem_d[];
+    return (double *)__smem_d;
+  }
+};
+
+template <typename tpe>
+__global__ void dotproduct(const tpe *const __restrict__ a,
+                           const tpe *const __restrict__ b, tpe *result,
+                           size_t nx, size_t ny) {
+
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
+  tpe *smem = SharedMemory<tpe>();
+  tpe sum = (tpe)0;
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY) {
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      const auto gindex = j * nx + i;
+      sum += a[gindex] * b[gindex];
+    }
+  }
+  auto tid = threadIdx.y * blockDim.x + threadIdx.x;
+  smem[tid] = sum;
+  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+    __syncthreads();
+    if (tid < s) {
+      smem[tid] += smem[tid + s];
+    }
+  }
+
+  if (0 == tid) {
+    atomicAdd(result, smem[0]);
+  }
+}
+
+template <typename tpe>
+tpe resudulanormcalc(const tpe *const __restrict__ res, const size_t &nx,
+                     const size_t &ny, const dim3 &blocksize,
+                     const dim3 &numblocks) {
+  size_t smemesize = blocksize.x * blocksize.y * sizeof(tpe);
+  tpe *resnormsq;
+  cudaMallocManaged(&resnormsq, sizeof(tpe));
+  cudaMemset(resnormsq, 0, sizeof(tpe));
+  dotproduct<<<numblocks, blocksize, smemesize>>>(res, res, resnormsq, nx, ny);
+  checkCudaError(cudaDeviceSynchronize());
+  return *resnormsq;
+}
+
+template <typename tpe>
+tpe alphaDenominatorcalc(const tpe *const __restrict__ p,
+                         const tpe *const __restrict__ ap, const size_t &nx,
+                         const size_t &ny, const dim3 &blocksize,
+                         const dim3 &numblocks) {
+  size_t smemesize = blocksize.x * blocksize.y * sizeof(tpe);
+  tpe *alphaDenominator;
+  cudaMallocManaged(&alphaDenominator, sizeof(tpe));
+  cudaMemset(alphaDenominator, 0, sizeof(tpe));
+  dotproduct<<<numblocks, blocksize, smemesize>>>(p, ap, alphaDenominator, nx,
+                                                  ny);
+  checkCudaError(cudaDeviceSynchronize());
+  return *alphaDenominator;
+}
+
 template <typename tpe>
 inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
                                 tpe *__restrict__ u, tpe *__restrict__ res,
@@ -109,25 +197,10 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
   cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
   dim3 numBlocks(smcount, 2);
 
-  // initialization
-  tpe initResSq = (tpe)0;
-
-  checkCudaError(cudaMemPrefetchAsync(res, sizeof(tpe) * nx * ny, 0));
-  checkCudaError(cudaMemPrefetchAsync(p, sizeof(tpe) * nx * ny, 0));
-  checkCudaError(cudaMemPrefetchAsync(rhs, sizeof(tpe) * nx * ny, 0));
-  checkCudaError(cudaMemPrefetchAsync(u, sizeof(tpe) * nx * ny, 0));
   residual_initp<tpe><<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
 
   // compute residual norm
-  checkCudaError(
-    cudaMemPrefetchAsync(res, sizeof(tpe) * nx * ny, cudaCpuDeviceId));
-  for (size_t j = 1; j < ny - 1; ++j) {
-    for (size_t i = 1; i < nx - 1; ++i) {
-      initResSq += res[j * nx + i] * res[j * nx + i];
-    }
-  }
-
-  tpe curResSq = initResSq;
+  tpe curResSq = resudulanormcalc(res, nx, ny, blockSize, numBlocks);
 
   // main loop
   for (size_t it = 0; it < maxIt; ++it) {
@@ -135,53 +208,32 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
 
     nvtxRangePushA("Ap");
     // compute A * p
-    checkCudaError(cudaMemPrefetchAsync(p, sizeof(tpe) * nx * ny, 0));
-    checkCudaError(cudaMemPrefetchAsync(ap, sizeof(tpe) * nx * ny, 0));
     cgAp<tpe><<<numBlocks, blockSize>>>(p, ap, nx, ny);
     checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
     tpe alphaNominator = curResSq;
-    checkCudaError(
-      cudaMemPrefetchAsync(p, sizeof(tpe) * nx * ny, cudaCpuDeviceId));
-    checkCudaError(
-      cudaMemPrefetchAsync(ap, sizeof(tpe) * nx * ny, cudaCpuDeviceId));
-    tpe alphaDenominator = (tpe)0;
-    for (size_t j = 1; j < ny - 1; ++j) {
-      for (size_t i = 1; i < nx - 1; ++i) {
-        alphaDenominator += p[j * nx + i] * ap[j * nx + i];
-      }
-    }
+    tpe alphaDenominator =
+      alphaDenominatorcalc(p, ap, nx, ny, blockSize, numBlocks);
     tpe alpha = alphaNominator / alphaDenominator;
     nvtxRangePop();
 
     // update solution
     nvtxRangePushA("solution");
-    checkCudaError(cudaMemPrefetchAsync(p, sizeof(tpe) * nx * ny, 0));
-    checkCudaError(cudaMemPrefetchAsync(u, sizeof(tpe) * nx * ny, 0));
     cgUpdateSol<tpe><<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
     checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
-    checkCudaError(cudaMemPrefetchAsync(ap, sizeof(tpe) * nx * ny, 0));
-    checkCudaError(cudaMemPrefetchAsync(res, sizeof(tpe) * nx * ny, 0));
     cgUpdateRes<tpe><<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
     checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // compute residual norm
     nvtxRangePushA("resNorm");
-    checkCudaError(
-      cudaMemPrefetchAsync(res, sizeof(tpe) * nx * ny, cudaCpuDeviceId));
-    tpe nextResSq = (tpe)0;
-    for (size_t j = 1; j < ny - 1; ++j) {
-      for (size_t i = 1; i < nx - 1; ++i) {
-        nextResSq += res[j * nx + i] * res[j * nx + i];
-      }
-    }
+    tpe nextResSq = resudulanormcalc(res, nx, ny, blockSize, numBlocks);
     nvtxRangePop();
 
     // check exit criterion
@@ -199,8 +251,6 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
 
     // update p
     nvtxRangePushA("p");
-    checkCudaError(cudaMemPrefetchAsync(res, sizeof(tpe) * nx * ny, 0));
-    checkCudaError(cudaMemPrefetchAsync(p, sizeof(tpe) * nx * ny, 0));
     cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
     checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
