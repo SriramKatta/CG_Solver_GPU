@@ -195,7 +195,7 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = 0;
   cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
-  dim3 numBlocks(smcount, 2);
+  dim3 numBlocks(smcount, 10);
 
   residual_initp<tpe><<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
 
