@@ -1,4 +1,4 @@
-// added prefetching to all kernls to page fault data transfer between cpu and gpu
+// V1 added prefetching to all kernls to page fault data transfer between cpu and gpu
 #include "cg-util.h"
 
 #include "cuda-util.h"
