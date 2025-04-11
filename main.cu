@@ -1,7 +1,7 @@
-//added prefetching to all kernls to page fault data transfer between cpu and gpu 
+// added prefetching to all kernls to page fault data transfer between cpu and gpu
 #include "cg-util.h"
 
-#include "../cuda-util.h"
+#include "cuda-util.h"
 
 #include <nvtx3/nvtx3.hpp>
 
@@ -203,6 +203,11 @@ inline int realMain(int argc, char *argv[])
     size_t nx, ny, nItWarmUp, nIt;
     parseCLA_2d(argc, argv, tpeName, nx, ny, nItWarmUp, nIt);
 
+    int devid;
+    cudaGetDevice(&devid);
+    std::cout << devid << std::endl;
+    cudaSetDevice(devid);
+
     tpe *u;
     checkCudaError(cudaMallocManaged(&u, sizeof(tpe) * nx * ny));
     tpe *rhs;
@@ -211,8 +216,8 @@ inline int realMain(int argc, char *argv[])
     // init
     initConjugateGradient(u, rhs, nx, ny);
 
-    checkCudaError(cudaMemPrefetchAsync(u, sizeof(tpe) * nx * ny, 0));
-    checkCudaError(cudaMemPrefetchAsync(rhs, sizeof(tpe) * nx * ny, 0));
+    checkCudaError(cudaMemPrefetchAsync(u, sizeof(tpe) * nx * ny, devid));
+    checkCudaError(cudaMemPrefetchAsync(rhs, sizeof(tpe) * nx * ny, devid));
 
     tpe *res;
     checkCudaError(cudaMallocManaged(&res, sizeof(tpe) * nx * ny));
@@ -258,8 +263,8 @@ int main(int argc, char *argv[])
 {
     if (argc < 2)
     {
-        std::cout << "Missing type specification" << std::endl;
-        return -1;
+        std::cout << "Missing type specification : defulted to double" << std::endl;
+        argv[1] = "double";
     }
 
     std::string tpeName(argv[1]);
