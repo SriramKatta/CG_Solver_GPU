@@ -1,4 +1,4 @@
-// V1 added prefetching to all kernls to page fault data transfer between cpu and gpu
+// V2 all gpu kernls only data moved once in each diection
 #include "cg-util.h"
 
 #include "cuda-util.h"
@@ -195,7 +195,7 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
     nvtxRangePushA("Ap");
     // compute A * p
     cgAp<tpe><<<numBlocks, blockSize>>>(p, ap, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    //checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
@@ -207,13 +207,13 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
     // update solution
     nvtxRangePushA("solution");
     cgUpdateSol<tpe><<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    //checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
     cgUpdateRes<tpe><<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    //checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // compute residual norm
@@ -237,7 +237,7 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
     // update p
     nvtxRangePushA("p");
     cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    //checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
   }
 
