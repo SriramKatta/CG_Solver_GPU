@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
 project(test LANGUAGES CUDA C)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
 include(cmake/CPM.cmake)
@@ -13,7 +14,7 @@ include_directories(NVTX/c/include)
 
 find_package(CUDAToolkit REQUIRED)
 
-set(CUDA_ARCHITECTURES 80)
+set(CMAKE_CUDA_ARCHITECTURES "80;86")
 
 add_executable(exe-main main.cu)
 target_link_libraries(exe-main PRIVATE CUDA::cudart)
