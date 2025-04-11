@@ -8,49 +8,61 @@
 template <typename tpe>
 __global__ void cgAp(const tpe *const __restrict__ p, tpe *__restrict__ ap,
                      const size_t nx, const size_t ny) {
-  size_t i = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t j = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
 
-  if (i < nx - 1 && j < ny - 1) {
-    ap[j * nx + i] =
-      4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
-                           p[(j - 1) * nx + i] + p[(j + 1) * nx + i]);
-  }
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      ap[j * nx + i] =
+        4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
+                             p[(j - 1) * nx + i] + p[(j + 1) * nx + i]);
+    }
 }
 
 template <typename tpe>
 __global__ void cgUpdateSol(const tpe *const __restrict__ p,
                             tpe *__restrict__ u, const tpe alpha,
                             const size_t nx, const size_t ny) {
-  size_t i = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t j = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
 
-  if (i < nx - 1 && j < ny - 1) {
-    u[j * nx + i] += alpha * p[j * nx + i];
-  }
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      u[j * nx + i] += alpha * p[j * nx + i];
+    }
 }
 
 template <typename tpe>
 __global__ void cgUpdateRes(const tpe *const __restrict__ ap,
                             tpe *__restrict__ res, const tpe alpha,
                             const size_t nx, const size_t ny) {
-  size_t i = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t j = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
 
-  if (i < nx - 1 && j < ny - 1) {
-    res[j * nx + i] = res[j * nx + i] - alpha * ap[j * nx + i];
-  }
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      res[j * nx + i] = res[j * nx + i] - alpha * ap[j * nx + i];
+    }
 }
 
 template <typename tpe>
 __global__ void cgUpdateP(tpe beta, const tpe *const __restrict__ res,
                           tpe *__restrict__ p, size_t nx, size_t ny) {
-  size_t i = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t j = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
 
-  if (i < nx - 1 && j < ny - 1) {
-    p[j * nx + i] = res[j * nx + i] + beta * p[j * nx + i];
-  }
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      p[j * nx + i] = res[j * nx + i] + beta * p[j * nx + i];
+    }
 }
 
 template <typename tpe>
@@ -58,16 +70,21 @@ __global__ void residual_initp(tpe *__restrict__ res, tpe *__restrict__ p,
                                const tpe *const __restrict__ rhs,
                                const tpe *const __restrict__ u, size_t nx,
                                size_t ny) {
-  size_t i = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t j = blockIdx.x * blockDim.x + threadIdx.x + 1;
 
-  if (i < nx - 1 && j < ny - 1) {
-    auto temp = rhs[j * nx + i] - (4 * u[j * nx + i] -
-                                   (u[j * nx + i - 1] + u[j * nx + i + 1] +
-                                    u[(j - 1) * nx + i] + u[(j + 1) * nx + i]));
-    res[j * nx + i] = temp;
-    p[j * nx + i] = temp;
-  }
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
+
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      auto temp =
+        rhs[j * nx + i] -
+        (4 * u[j * nx + i] - (u[j * nx + i - 1] + u[j * nx + i + 1] +
+                              u[(j - 1) * nx + i] + u[(j + 1) * nx + i]));
+      res[j * nx + i] = temp;
+      p[j * nx + i] = temp;
+    }
 }
 
 template <typename tpe>
@@ -79,23 +96,13 @@ inline size_t conjugateGradient(const tpe *const __restrict__ rhs,
 
   constexpr auto blockSize_x = 32, blockSize_y = 16;
   dim3 blockSize(blockSize_x, blockSize_y);
-  dim3 numBlocks(ceilingDivide(nx - 2, blockSize.x),
-                 ceilingDivide(ny - 2, blockSize.y));
+  int smcount = 0;
+  cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
+  dim3 numBlocks(smcount, 10);
 
   // initialization
   tpe initResSq = (tpe)0;
 
-  // compute initial residual
-  // init p
-  // for (size_t j = 1; j < ny - 1; ++j)
-  //{
-  //    for (size_t i = 1; i < nx - 1; ++i)
-  //    {
-  //        auto temp = rhs[j * nx + i] - (4 * u[j * nx + i] - (u[j * nx + i - 1] + u[j * nx + i + 1] + u[(j - 1) * nx + i] + u[(j + 1) * nx + i]));
-  //        res[j * nx + i] = temp;
-  //        p[j * nx + i] = temp;
-  //    }
-  //}
   checkCudaError(cudaMemPrefetchAsync(res, sizeof(tpe) * nx * ny, 0));
   checkCudaError(cudaMemPrefetchAsync(p, sizeof(tpe) * nx * ny, 0));
   checkCudaError(cudaMemPrefetchAsync(rhs, sizeof(tpe) * nx * ny, 0));
