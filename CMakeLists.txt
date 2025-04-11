@@ -20,5 +20,5 @@ target_link_libraries(exe-main PRIVATE CCCL::CUB)
 target_link_libraries(exe-main PRIVATE CCCL::Thrust)
 target_link_libraries(exe-main PRIVATE nvtx3-c)
 
-target_compile_options(exe-main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-O3 -fast>)
+#target_compile_options(exe-main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-O3 -fast>)
 
