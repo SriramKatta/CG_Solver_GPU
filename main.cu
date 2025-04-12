@@ -213,7 +213,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     nvtxRangePushA("Ap");
     // compute A * p
     cgAp<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
-    //checkCudaError(cudaDeviceSynchronize());
+    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
@@ -225,13 +225,13 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // update solution
     nvtxRangePushA("solution");
     cgUpdateSol<VT><<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
-    //checkCudaError(cudaDeviceSynchronize());
+    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
     cgUpdateRes<VT><<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
-    //checkCudaError(cudaDeviceSynchronize());
+    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // compute residual norm
