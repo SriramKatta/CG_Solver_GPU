@@ -22,9 +22,8 @@ __global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
 }
 
 template <typename VT>
-__global__ void cgUpdateSol(const VT *const __restrict__ p,
-                            VT *__restrict__ u, const VT alpha,
-                            const size_t nx, const size_t ny) {
+__global__ void cgUpdateSol(const VT *const __restrict__ p, VT *__restrict__ u,
+                            const VT alpha, const size_t nx, const size_t ny) {
   size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
   size_t gridStrideX = gridDim.x * blockDim.x;
   size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -160,7 +159,7 @@ __global__ void innerproduct(const VT *const __restrict__ A,
 
 template <typename VT>
 VT resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
-                  dim3 numblocks, dim3 blocksize) {
+                 dim3 numblocks, dim3 blocksize) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   VT *ressqnorm;
   cudaMallocManaged(&ressqnorm, sizeof(VT));
@@ -171,9 +170,8 @@ VT resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
 }
 
 template <typename VT>
-VT alphadencalc(const VT *const __restrict__ p,
-                 const VT *const __restrict__ ap, size_t nx, size_t ny,
-                 dim3 numblocks, dim3 blocksize) {
+VT alphadencalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
+                size_t nx, size_t ny, dim3 numblocks, dim3 blocksize) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   VT *alphaden;
   cudaMallocManaged(&alphaden, sizeof(VT));
@@ -268,23 +266,29 @@ inline int realMain(int argc, char *argv[]) {
   size_t nx, ny, nItWarmUp, nIt;
   parseCLA_2d(argc, argv, tpeName, nx, ny, nItWarmUp, nIt);
 
-  VT *u;
-  checkCudaError(cudaMallocManaged(&u, sizeof(VT) * nx * ny));
-  VT *rhs;
-  checkCudaError(cudaMallocManaged(&rhs, sizeof(VT) * nx * ny));
+  VT *u_host;
+  VT *rhs_host;
+  checkCudaError(cudaMallocHost(&u_host, sizeof(VT) * nx * ny));
+  checkCudaError(cudaMallocHost(&rhs_host, sizeof(VT) * nx * ny));
 
   // init
-  initConjugateGradient(u, rhs, nx, ny);
+  initConjugateGradient(u_host, rhs_host, nx, ny);
 
-  checkCudaError(cudaMemPrefetchAsync(u, sizeof(VT) * nx * ny, 0));
-  checkCudaError(cudaMemPrefetchAsync(rhs, sizeof(VT) * nx * ny, 0));
+  VT *u;
+  VT *rhs;
+  checkCudaError(cudaMalloc(&u, sizeof(VT) * nx * ny));
+  checkCudaError(cudaMalloc(&rhs, sizeof(VT) * nx * ny));
+  checkCudaError(
+    cudaMemcpy(u, u_host, sizeof(VT) * nx * ny, cudaMemcpyHostToDevice));
+  checkCudaError(
+    cudaMemcpy(rhs, rhs_host, sizeof(VT) * nx * ny, cudaMemcpyHostToDevice));
 
   VT *res;
-  checkCudaError(cudaMallocManaged(&res, sizeof(VT) * nx * ny));
+  checkCudaError(cudaMalloc(&res, sizeof(VT) * nx * ny));
   VT *p;
-  checkCudaError(cudaMallocManaged(&p, sizeof(VT) * nx * ny));
+  checkCudaError(cudaMalloc(&p, sizeof(VT) * nx * ny));
   VT *ap;
-  checkCudaError(cudaMallocManaged(&ap, sizeof(VT) * nx * ny));
+  checkCudaError(cudaMalloc(&ap, sizeof(VT) * nx * ny));
 
   checkCudaError(cudaMemset(res, 0, sizeof(VT) * nx * ny));
   checkCudaError(cudaMemset(p, 0, sizeof(VT) * nx * ny));
@@ -304,16 +308,19 @@ inline int realMain(int argc, char *argv[]) {
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 
   checkCudaError(
-    cudaMemPrefetchAsync(u, sizeof(VT) * nx * ny, cudaCpuDeviceId));
+    cudaMemcpy(u_host, u, sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
   checkCudaError(
-    cudaMemPrefetchAsync(rhs, sizeof(VT) * nx * ny, cudaCpuDeviceId));
+    cudaMemcpy(rhs_host, rhs, sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
 
   // check solution
-  checkSolutionConjugateGradient(u, rhs, nx, ny);
+  checkSolutionConjugateGradient(u_host, rhs_host, nx, ny);
 
   checkCudaError(cudaFree(res));
   checkCudaError(cudaFree(p));
   checkCudaError(cudaFree(ap));
+
+  checkCudaError(cudaFreeHost(u_host));
+  checkCudaError(cudaFreeHost(rhs_host));
 
   checkCudaError(cudaFree(u));
   checkCudaError(cudaFree(rhs));
