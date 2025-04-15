@@ -162,11 +162,14 @@ VT resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
                  dim3 numblocks, dim3 blocksize) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   VT *ressqnorm;
+  VT hostressqnorm = 0.0;
   cudaMallocManaged(&ressqnorm, sizeof(VT));
   cudaMemset(ressqnorm, 0, sizeof(VT));
   innerproduct<<<numblocks, blocksize, smemsize>>>(res, res, ressqnorm, nx, ny);
-  checkCudaError(cudaDeviceSynchronize());
-  return *ressqnorm;
+  checkCudaError(
+    cudaMemcpy(&hostressqnorm, ressqnorm, sizeof(VT), cudaMemcpyDeviceToHost));
+  checkCudaError(cudaFree(ressqnorm));
+  return hostressqnorm;
 }
 
 template <typename VT>
@@ -174,11 +177,14 @@ VT alphadencalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
                 size_t nx, size_t ny, dim3 numblocks, dim3 blocksize) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   VT *alphaden;
-  cudaMallocManaged(&alphaden, sizeof(VT));
+  VT hostalphaden = 1.0;
+  cudaMalloc(&alphaden, sizeof(VT));
   cudaMemset(alphaden, 0, sizeof(VT));
   innerproduct<<<numblocks, blocksize, smemsize>>>(p, ap, alphaden, nx, ny);
-  checkCudaError(cudaDeviceSynchronize());
-  return *alphaden;
+  checkCudaError(
+    cudaMemcpy(&hostalphaden, alphaden, sizeof(VT), cudaMemcpyDeviceToHost));
+  checkCudaError(cudaFree(alphaden));
+  return hostalphaden;
 }
 
 template <typename VT>
@@ -253,7 +259,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // update p
     nvtxRangePushA("p");
     cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
-    //checkCudaError(cudaDeviceSynchronize());
+    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
   }
 

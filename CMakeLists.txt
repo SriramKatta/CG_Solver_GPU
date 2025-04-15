@@ -23,6 +23,6 @@ target_link_libraries(exe-main PRIVATE CCCL::Thrust)
 target_link_libraries(exe-main PRIVATE nvtx3-c)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(exe-main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
+    target_compile_options(exe-main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G -lineinfo>)
 endif()
 
