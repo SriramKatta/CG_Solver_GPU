@@ -5,21 +5,8 @@
 
 #include <nvtx3/nvtx3.hpp>
 
-template <typename VT>
-__global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
-                     const size_t nx, const size_t ny) {
-  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t gridStrideY = gridDim.y * blockDim.y;
+#include "gpu_kernels.cuh"
 
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
-    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      ap[j * nx + i] =
-        4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
-                             p[(j - 1) * nx + i] + p[(j + 1) * nx + i]);
-    }
-}
 
 template <typename VT>
 __global__ void cgUpdateSol(const VT *const __restrict__ p, VT *__restrict__ u,
@@ -85,34 +72,6 @@ __global__ void residual_initp(VT *__restrict__ res, VT *__restrict__ p,
       p[j * nx + i] = temp;
     }
 }
-
-template <class VT>
-struct SharedMemory {
-  __device__ inline operator VT *() {
-    extern __shared__ int __smem[];
-    return (VT *)__smem;
-  }
-
-  __device__ inline operator const VT *() const {
-    extern __shared__ int __smem[];
-    return (VT *)__smem;
-  }
-};
-
-// specialize for double to avoid unaligned memory
-// access compile errors
-template <>
-struct SharedMemory<double> {
-  __device__ inline operator double *() {
-    extern __shared__ double __smem_d[];
-    return (double *)__smem_d;
-  }
-
-  __device__ inline operator const double *() const {
-    extern __shared__ double __smem_d[];
-    return (double *)__smem_d;
-  }
-};
 
 template <typename VT>
 __inline__ __device__ void smem_reduce(VT *sdata, const int tid,
@@ -188,6 +147,10 @@ VT alphadencalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
 }
 
 template <typename VT>
+void cgApcalc(const dim3 &numBlocks, const dim3 &blockSize, VT *__restrict__ &p,
+              VT *__restrict__ &ap, const size_t &nx, const size_t &ny);
+
+template <typename VT>
 inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 VT *__restrict__ u, VT *__restrict__ res,
                                 VT *__restrict__ p, VT *__restrict__ ap,
@@ -216,8 +179,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     nvtxRangePushA("Ap");
     // compute A * p
-    cgAp<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    cgApcalc(numBlocks, blockSize, p, ap, nx, ny);
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
@@ -265,6 +227,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
   return maxIt;
 }
+
 
 template <typename VT>
 inline int realMain(int argc, char *argv[]) {
