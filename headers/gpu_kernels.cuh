@@ -58,7 +58,7 @@ __global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
     tile[localIdx - smem_pitch] = p[globalIdx - nx];
   }
   if (blockDim.y - 1 == ty) {
-    tile[localIdx + smem_pitch] = p[globalIdx + ny];
+    tile[localIdx + smem_pitch] = p[globalIdx + nx];
   }
   __syncthreads();
 
