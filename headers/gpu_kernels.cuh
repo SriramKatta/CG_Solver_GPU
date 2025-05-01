@@ -63,7 +63,7 @@ __global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
   __syncthreads();
 
   ap[j * nx + i] =
-    4 * p[j * nx + i] - (tile[localIdx - 1] + tile[localIdx + 1] +
+    4 * tile[localIdx] - (tile[localIdx - 1] + tile[localIdx + 1] +
                          tile[localIdx - smem_pitch] + tile[localIdx + smem_pitch]);
 }
 
