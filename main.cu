@@ -6,8 +6,9 @@
 #include <nvtx3/nvtx3.hpp>
 
 template <typename VT>
-__global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
-                     const size_t nx, const size_t ny) {
+__global__ void applystencil(const VT *const __restrict__ p,
+                             VT *__restrict__ ap, const size_t nx,
+                             const size_t ny) {
   size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
   size_t gridStrideX = gridDim.x * blockDim.x;
   size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -212,9 +213,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   residual_initp<VT><<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
 
   // compute residual norm
-  initResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
-
-  VT curResSq = initResSq;
+  VT curResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
 
   // main loop
   for (size_t it = 0; it < maxIt; ++it) {
@@ -222,7 +221,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     nvtxRangePushA("Ap");
     // compute A * p
-    cgAp<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
+    applystencil<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
     checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
