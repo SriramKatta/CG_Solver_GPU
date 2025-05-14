@@ -126,15 +126,10 @@ __inline__ __device__ void smem_reduce(VT *sdata, const int tid,
 }
 
 template <typename VT>
-__global__ void innerproduct(const VT *const __restrict__ A,
-                             const VT *const __restrict__ B, VT *result,
-                             size_t nx, size_t ny) {
-  VT *sdata = SharedMemory<VT>();
+__device__ VT innerproduct_tile(const VT *A, const VT *B, size_t nx,
+                                size_t ny) {
   const int tx = threadIdx.x;
   const int ty = threadIdx.y;
-  const int tid = ty * blockDim.x + tx;
-  const int blockSize = blockDim.x * blockDim.y;
-
   const int ix = blockIdx.x * blockDim.x + tx + 1;
   const int iy = blockIdx.y * blockDim.y + ty + 1;
   const int strideX = blockDim.x * gridDim.x;
@@ -147,8 +142,19 @@ __global__ void innerproduct(const VT *const __restrict__ A,
       sum += A[idx] * B[idx];
     }
   }
+  return sum;
+}
 
-  sdata[tid] = sum;
+
+template <typename VT>
+__global__ void innerproduct(const VT *const __restrict__ A,
+                             const VT *const __restrict__ B, VT *result,
+                             size_t nx, size_t ny) {
+  VT *sdata = SharedMemory<VT>();
+  const int tid = threadIdx.y * blockDim.x + threadIdx.x;
+  const int blockSize = blockDim.x * blockDim.y;
+
+  sdata[tid] = innerproduct_tile(A, B, nx, ny);
 
   smem_reduce(sdata, tid, blockSize);
 
@@ -247,8 +253,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     if (sqrt(nextResSq) <= 1e-12)
       return it;
 
-    // if (0 == it % 100)
-    //     std::cout << "    " << it << " : " << sqrt(nextResSq) << std::endl;
+    if (0 == it % 100)
+      std::cout << "    " << it << " : " << sqrt(nextResSq) << std::endl;
 
     // compute beta
     nvtxRangePushA("beta");
