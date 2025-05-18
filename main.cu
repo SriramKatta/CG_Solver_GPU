@@ -24,7 +24,7 @@ __global__ void applystencil(const VT *const __restrict__ p,
 
 template <typename VT>
 __global__ void cgUpdateSol(const VT *const __restrict__ p, VT *__restrict__ u,
-                            const VT alpha, const size_t nx, const size_t ny) {
+                            const VT *alpha, const size_t nx, const size_t ny) {
   size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
   size_t gridStrideX = gridDim.x * blockDim.x;
   size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -32,13 +32,13 @@ __global__ void cgUpdateSol(const VT *const __restrict__ p, VT *__restrict__ u,
 
   for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
     for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      u[j * nx + i] += alpha * p[j * nx + i];
+      u[j * nx + i] += (*alpha) * p[j * nx + i];
     }
 }
 
 template <typename VT>
 __global__ void cgUpdateRes(const VT *const __restrict__ ap,
-                            VT *__restrict__ res, const VT alpha,
+                            VT *__restrict__ res, const VT *alpha,
                             const size_t nx, const size_t ny) {
   size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
   size_t gridStrideX = gridDim.x * blockDim.x;
@@ -47,12 +47,12 @@ __global__ void cgUpdateRes(const VT *const __restrict__ ap,
 
   for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
     for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      res[j * nx + i] = res[j * nx + i] - alpha * ap[j * nx + i];
+      res[j * nx + i] = res[j * nx + i] - (*alpha) * ap[j * nx + i];
     }
 }
 
 template <typename VT>
-__global__ void cgUpdateP(VT beta, const VT *const __restrict__ res,
+__global__ void cgUpdateP(const VT *beta, const VT *const __restrict__ res,
                           VT *__restrict__ p, size_t nx, size_t ny) {
   size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
   size_t gridStrideX = gridDim.x * blockDim.x;
@@ -61,7 +61,7 @@ __global__ void cgUpdateP(VT beta, const VT *const __restrict__ res,
 
   for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
     for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      p[j * nx + i] = res[j * nx + i] + beta * p[j * nx + i];
+      p[j * nx + i] = res[j * nx + i] + (*beta) * p[j * nx + i];
     }
 }
 
@@ -165,33 +165,33 @@ __global__ void innerproduct(const VT *const __restrict__ A,
 }
 
 template <typename VT>
-VT resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
-                 dim3 numblocks, dim3 blocksize) {
-  size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
-  VT *ressqnorm;
-  VT hostressqnorm = 0.0;
-  cudaMallocManaged(&ressqnorm, sizeof(VT));
-  cudaMemset(ressqnorm, 0, sizeof(VT));
-  innerproduct<<<numblocks, blocksize, smemsize>>>(res, res, ressqnorm, nx, ny);
-  checkCudaError(
-    cudaMemcpy(&hostressqnorm, ressqnorm, sizeof(VT), cudaMemcpyDeviceToHost));
-  checkCudaError(cudaFree(ressqnorm));
-  return hostressqnorm;
+__global__ void gpu_devide(const VT *const num, const VT *const den,
+                           VT * res) {
+
+  if (threadIdx.x == 0) {
+    *res = (*num) / (*den);
+  }
 }
 
 template <typename VT>
-VT alphadencalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
-                size_t nx, size_t ny, dim3 numblocks, dim3 blocksize) {
+void resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
+                   dim3 numblocks, dim3 blocksize, VT *ressqnorm) {
+  size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
+  cudaMemset(ressqnorm, 0, sizeof(VT));
+  innerproduct<<<numblocks, blocksize, smemsize>>>(res, res, ressqnorm, nx, ny);
+}
+
+template <typename VT>
+void alphacalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
+               size_t nx, size_t ny, dim3 numblocks, dim3 blocksize,
+               VT *alphanum, VT *alpha) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   VT *alphaden;
   VT hostalphaden = 1.0;
   cudaMalloc(&alphaden, sizeof(VT));
   cudaMemset(alphaden, 0, sizeof(VT));
   innerproduct<<<numblocks, blocksize, smemsize>>>(p, ap, alphaden, nx, ny);
-  checkCudaError(
-    cudaMemcpy(&hostalphaden, alphaden, sizeof(VT), cudaMemcpyDeviceToHost));
-  checkCudaError(cudaFree(alphaden));
-  return hostalphaden;
+  gpu_devide<<<1, 1>>>(alphanum, alphaden, alpha);
 }
 
 template <typename VT>
@@ -208,12 +208,25 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   dim3 numBlocks(smcount, 10);
 
   // initialization
-  VT initResSq = (VT)0;
+  //VT initResSq = (VT)0;
 
   residual_initp<VT><<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
 
+  VT *curResSq;
+  cudaMallocManaged(&curResSq, sizeof(VT));
+  cudaMemset(curResSq, 0, sizeof(VT));
+  VT *nextResSq;
+  cudaMallocManaged(&nextResSq, sizeof(VT));
+  cudaMemset(nextResSq, 0, sizeof(VT));
+  VT *alpha;
+  cudaMallocManaged(&alpha, sizeof(VT));
+  cudaMemset(alpha, 0, sizeof(VT));
+  VT *beta;
+  cudaMallocManaged(&beta, sizeof(VT));
+  cudaMemset(beta, 0, sizeof(VT));
+
   // compute residual norm
-  VT curResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
+  resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq);
 
   // main loop
   for (size_t it = 0; it < maxIt; ++it) {
@@ -226,9 +239,10 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
-    VT alphaNominator = curResSq;
-    VT alphaDenominator = alphadencalc(p, ap, nx, ny, numBlocks, blockSize);
-    VT alpha = alphaNominator / alphaDenominator;
+    //VT alphaNominator = curResSq;
+    //VT alphaDenominator =
+    alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alpha);
+    //VT alpha = alphaNominator / alphaDenominator;
     nvtxRangePop();
 
     // update solution
@@ -245,20 +259,25 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     // compute residual norm
     nvtxRangePushA("resNorm");
-    VT nextResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
+    //VT nextResSq =
+    resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq);
     nvtxRangePop();
 
     // check exit criterion
-    if (sqrt(nextResSq) <= 1e-12)
+    cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
+    if (sqrt(*nextResSq) <= 1e-12)
       return it;
 
     if (0 == it % 100)
-      std::cout << "    " << it << " : " << sqrt(nextResSq) << std::endl;
+      std::cout << "    " << it << " : " << sqrt(*nextResSq) << std::endl;
 
     // compute beta
+    cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
     nvtxRangePushA("beta");
-    VT beta = nextResSq / curResSq;
-    curResSq = nextResSq;
+    gpu_devide<<<1,1>>>(nextResSq, curResSq, beta);
+    //VT beta = nextResSq / curResSq;
+    cudaMemcpy(curResSq, nextResSq, sizeof(VT), cudaMemcpyDeviceToDevice);
+    //curResSq = nextResSq;
     nvtxRangePop();
 
     // update p
@@ -340,16 +359,16 @@ inline int realMain(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    std::cout << "Missing type specification " << std::endl;
-    return 1;
-  }
+  //if (argc < 2) {
+  //  std::cout << "Missing type specification " << std::endl;
+  //  return 1;
+  //}
 
   std::string tpeName(argv[1]);
 
   if ("float" == tpeName)
     return realMain<float>(argc, argv);
-  if ("double" == tpeName)
+  if ("double" == tpeName || tpeName.empty())
     return realMain<double>(argc, argv);
 
   std::cout << "Invalid type specification (" << argv[1]
