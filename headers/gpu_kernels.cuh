@@ -30,7 +30,7 @@ struct SharedMemory<double> {
 };
 
 template <typename VT>
-__global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
+__global__ void cgAp0(const VT *const __restrict__ p, VT *__restrict__ ap,
                      const size_t nx, const size_t ny) {
   size_t tx = threadIdx.x;
   size_t ty = threadIdx.y;
@@ -47,24 +47,22 @@ __global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
   // load data into shared mem
   VT *tile = SharedMemory<VT>();
   tile[localIdx] = p[globalIdx];
-  if (0 == tx) {
-    tile[localIdx - 1] = p[globalIdx - 1];
-  }
-  if (blockDim.x - 1 == tx) {
-    tile[localIdx + 1] = p[globalIdx + 1];
-  }
 
-  if (0 == ty) {
+  // halos
+  if (tx == 0 && i > 1)
+    tile[localIdx - 1] = p[globalIdx - 1];
+  if (tx == blockDim.x - 1 && i < nx - 2)
+    tile[localIdx + 1] = p[globalIdx + 1];
+  if (ty == 0 && j > 1)
     tile[localIdx - smem_pitch] = p[globalIdx - nx];
-  }
-  if (blockDim.y - 1 == ty) {
+  if (ty == blockDim.y - 1 && j < ny - 2)
     tile[localIdx + smem_pitch] = p[globalIdx + nx];
-  }
+
   __syncthreads();
 
-  ap[j * nx + i] =
-    4 * tile[localIdx] - (tile[localIdx - 1] + tile[localIdx + 1] +
-                         tile[localIdx - smem_pitch] + tile[localIdx + smem_pitch]);
+  ap[globalIdx] = 4 * tile[localIdx] -
+                  (tile[localIdx - 1] + tile[localIdx + 1] +
+                   tile[localIdx - smem_pitch] + tile[localIdx + smem_pitch]);
 }
 
 template <typename VT>
@@ -74,7 +72,24 @@ inline void cgApcalc(const dim3 &numBlocks, const dim3 &blockSize,
   size_t totalthreads = (blockSize.x + 2) * (blockSize.y + 2) * blockSize.z;
   dim3 numBlockslocal((nx + blockSize.x - 1) / blockSize.x,
                       (ny + blockSize.y - 1) / blockSize.y, 1);
-  cgAp<VT><<<numBlockslocal, blockSize, totalthreads * sizeof(VT)>>>(p, ap,
-                                                                        nx, ny);
+  cgAp0<VT>
+    <<<numBlockslocal, blockSize, totalthreads * sizeof(VT)>>>(p, ap, nx, ny);
   checkCudaError(cudaDeviceSynchronize());
+}
+
+
+template <typename VT>
+__global__ void cgAp(const VT *const __restrict__ p, VT *__restrict__ ap,
+                     const size_t nx, const size_t ny) {
+  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
+  size_t gridStrideX = gridDim.x * blockDim.x;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStrideY = gridDim.y * blockDim.y;
+
+  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
+      ap[j * nx + i] =
+        4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
+                             p[(j - 1) * nx + i] + p[(j + 1) * nx + i]);
+    }
 }

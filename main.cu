@@ -74,13 +74,37 @@ __global__ void residual_initp(VT *__restrict__ res, VT *__restrict__ p,
 }
 
 template <typename VT>
-__inline__ __device__ void smem_reduce(VT *sdata, const int tid,
-                                       const int blockSize) {
+__forceinline__ __device__ void smem_reduce(VT *sdata, const int tid,
+                                            const int blockSize) {
   for (int s = blockSize / 2; s > 0; s >>= 1) {
     __syncthreads();
     if (tid < s) {
       sdata[tid] += sdata[tid + s];
     }
+  }
+}
+
+template <typename VT>
+__forceinline__ __device__ VT compute_partial_inner_product(const VT *A,
+                                                            const VT *B, int nx,
+                                                            int ny, int ix,
+                                                            int iy, int strideX,
+                                                            int strideY) {
+  VT sum = static_cast<VT>(0);
+  for (int y = iy; y < ny - 1; y += strideY) {
+    for (int x = ix; x < nx - 1; x += strideX) {
+      int idx = y * nx + x;
+      sum += A[idx] * B[idx];
+    }
+  }
+  return sum;
+}
+
+template <typename VT>
+__forceinline__ __device__ void add_block_result(VT *result, VT *sdata,
+                                                 const int tid) {
+  if (tid == 0) {
+    atomicAdd(result, sdata[0]);
   }
 }
 
@@ -92,28 +116,19 @@ __global__ void innerproduct(const VT *const __restrict__ A,
   const int tx = threadIdx.x;
   const int ty = threadIdx.y;
   const int tid = ty * blockDim.x + tx;
-  const int blockSize = blockDim.x * blockDim.y;
 
   const int ix = blockIdx.x * blockDim.x + tx + 1;
   const int iy = blockIdx.y * blockDim.y + ty + 1;
   const int strideX = blockDim.x * gridDim.x;
   const int strideY = blockDim.y * gridDim.y;
-  VT sum = static_cast<VT>(0);
 
-  for (int y = iy; y < ny - 1; y += strideY) {
-    for (int x = ix; x < nx - 1; x += strideX) {
-      int idx = y * nx + x;
-      sum += A[idx] * B[idx];
-    }
-  }
+  sdata[tid] =
+    compute_partial_inner_product(A, B, nx, ny, ix, iy, strideX, strideY);
 
-  sdata[tid] = sum;
-
+  const int blockSize = blockDim.x * blockDim.y;
   smem_reduce(sdata, tid, blockSize);
 
-  if (tid == 0) {
-    atomicAdd(result, sdata[0]);
-  }
+  add_block_result(result, sdata, tid);
 }
 
 template <typename VT>
@@ -179,7 +194,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     nvtxRangePushA("Ap");
     // compute A * p
-    cgApcalc(numBlocks, blockSize, p, ap, nx, ny);
+    cgAp<<<numBlocks, blockSize>>>(p, ap, nx, ny);
+    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
