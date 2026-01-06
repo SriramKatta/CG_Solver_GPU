@@ -304,9 +304,6 @@ inline int realMain(int argc, char *argv[]) {
   auto ap = gcxx::device_vector<VT>(nx*ny);
   auto ap_span = gcxx::span(ap.data(), nx*ny);
 
-  // checkCudaError(cudaMemset(res, 0, sizeof(VT) * nx * ny));
-  // checkCudaError(cudaMemset(p, 0, sizeof(VT) * nx * ny));
-  // checkCudaError(cudaMemset(ap, 0, sizeof(VT) * nx * ny));
   gcxx::memory::Memset(res_span, 0);
   gcxx::memory::Memset(p_span, 0);
   gcxx::memory::Memset(ap_span, 0);
@@ -324,10 +321,6 @@ inline int realMain(int argc, char *argv[]) {
 
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 
-  // checkCudaError(
-  //   cudaMemcpy(u_host.data(), u.data(), sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
-  // checkCudaError(
-  //   cudaMemcpy(rhs_host.data(), rhs.data(), sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
   gcxx::memory::copy(u_host_span, u_span);
   gcxx::memory::copy(rhs_host_span, rhs_span);
 
