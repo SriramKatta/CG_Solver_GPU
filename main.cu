@@ -1,200 +1,11 @@
 // V2 all gpu kernls only data moved once in each diection
 #include "cg-util.h"
 
-#include "cuda-util.h"
-
 #include <gcxx/api.hpp>
 
 #include <nvtx3/nvtx3.hpp>
 
-template <typename VT>
-__global__ void applystencil(const VT *const __restrict__ p,
-                             VT *__restrict__ ap, const size_t nx,
-                             const size_t ny) {
-  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t gridStrideY = gridDim.y * blockDim.y;
-
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
-    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      ap[j * nx + i] =
-        4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
-                             p[(j - 1) * nx + i] + p[(j + 1) * nx + i]);
-    }
-}
-
-template <typename VT>
-__global__ void cgUpdateSol(const VT *const __restrict__ p, VT *__restrict__ u,
-                            const VT alpha, const size_t nx, const size_t ny) {
-  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t gridStrideY = gridDim.y * blockDim.y;
-
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
-    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      u[j * nx + i] += alpha * p[j * nx + i];
-    }
-}
-
-template <typename VT>
-__global__ void cgUpdateRes(const VT *const __restrict__ ap,
-                            VT *__restrict__ res, const VT alpha,
-                            const size_t nx, const size_t ny) {
-  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t gridStrideY = gridDim.y * blockDim.y;
-
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
-    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      res[j * nx + i] = res[j * nx + i] - alpha * ap[j * nx + i];
-    }
-}
-
-template <typename VT>
-__global__ void cgUpdateP(VT beta, const VT *const __restrict__ res,
-                          VT *__restrict__ p, size_t nx, size_t ny) {
-  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t gridStrideY = gridDim.y * blockDim.y;
-
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
-    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      p[j * nx + i] = res[j * nx + i] + beta * p[j * nx + i];
-    }
-}
-
-template <typename VT>
-__global__ void residual_initp(VT *__restrict__ res, VT *__restrict__ p,
-                               const VT *const __restrict__ rhs,
-                               const VT *const __restrict__ u, size_t nx,
-                               size_t ny) {
-
-  size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
-  size_t gridStrideY = gridDim.y * blockDim.y;
-
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
-    for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
-      auto temp =
-        rhs[j * nx + i] -
-        (4 * u[j * nx + i] - (u[j * nx + i - 1] + u[j * nx + i + 1] +
-                              u[(j - 1) * nx + i] + u[(j + 1) * nx + i]));
-      res[j * nx + i] = temp;
-      p[j * nx + i] = temp;
-    }
-}
-
-template <class VT>
-struct SharedMemory {
-  __device__ inline operator VT *() {
-    extern __shared__ int __smem[];
-    return (VT *)__smem;
-  }
-
-  __device__ inline operator const VT *() const {
-    extern __shared__ int __smem[];
-    return (VT *)__smem;
-  }
-};
-
-// specialize for double to avoid unaligned memory
-// access compile errors
-template <>
-struct SharedMemory<double> {
-  __device__ inline operator double *() {
-    extern __shared__ double __smem_d[];
-    return (double *)__smem_d;
-  }
-
-  __device__ inline operator const double *() const {
-    extern __shared__ double __smem_d[];
-    return (double *)__smem_d;
-  }
-};
-
-template <typename VT>
-__inline__ __device__ void smem_reduce(VT *sdata, const int tid,
-                                       const int blockSize) {
-  for (int s = blockSize / 2; s > 0; s >>= 1) {
-    __syncthreads();
-    if (tid < s) {
-      sdata[tid] += sdata[tid + s];
-    }
-  }
-}
-
-template <typename VT>
-__device__ VT innerproduct_tile(const VT *A, const VT *B, size_t nx,
-                                size_t ny) {
-  const int tx = threadIdx.x;
-  const int ty = threadIdx.y;
-  const int ix = blockIdx.x * blockDim.x + tx + 1;
-  const int iy = blockIdx.y * blockDim.y + ty + 1;
-  const int strideX = blockDim.x * gridDim.x;
-  const int strideY = blockDim.y * gridDim.y;
-  VT sum = static_cast<VT>(0);
-
-  for (int y = iy; y < ny - 1; y += strideY) {
-    for (int x = ix; x < nx - 1; x += strideX) {
-      int idx = y * nx + x;
-      sum += A[idx] * B[idx];
-    }
-  }
-  return sum;
-}
-
-
-template <typename VT>
-__global__ void innerproduct(const VT *const __restrict__ A,
-                             const VT *const __restrict__ B, VT *result,
-                             size_t nx, size_t ny) {
-  VT *sdata = SharedMemory<VT>();
-  const int tid = threadIdx.y * blockDim.x + threadIdx.x;
-  const int blockSize = blockDim.x * blockDim.y;
-
-  sdata[tid] = innerproduct_tile(A, B, nx, ny);
-
-  smem_reduce(sdata, tid, blockSize);
-
-  if (tid == 0) {
-    atomicAdd(result, sdata[0]);
-  }
-}
-
-template <typename VT>
-VT resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
-                 dim3 numblocks, dim3 blocksize) {
-  size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
-  VT *ressqnorm;
-  VT hostressqnorm = 0.0;
-  cudaMallocManaged(&ressqnorm, sizeof(VT));
-  cudaMemset(ressqnorm, 0, sizeof(VT));
-  innerproduct<<<numblocks, blocksize, smemsize>>>(res, res, ressqnorm, nx, ny);
-  checkCudaError(
-    cudaMemcpy(&hostressqnorm, ressqnorm, sizeof(VT), cudaMemcpyDeviceToHost));
-  checkCudaError(cudaFree(ressqnorm));
-  return hostressqnorm;
-}
-
-template <typename VT>
-VT alphadencalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
-                size_t nx, size_t ny, dim3 numblocks, dim3 blocksize) {
-  size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
-  VT *alphaden;
-  VT hostalphaden = 1.0;
-  cudaMalloc(&alphaden, sizeof(VT));
-  cudaMemset(alphaden, 0, sizeof(VT));
-  innerproduct<<<numblocks, blocksize, smemsize>>>(p, ap, alphaden, nx, ny);
-  checkCudaError(
-    cudaMemcpy(&hostalphaden, alphaden, sizeof(VT), cudaMemcpyDeviceToHost));
-  checkCudaError(cudaFree(alphaden));
-  return hostalphaden;
-}
+#include "kernels.cuh"
 
 template <typename VT>
 inline size_t conjugateGradient(const VT *const __restrict__ rhs,
@@ -205,8 +16,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
   constexpr auto blockSize_x = 32, blockSize_y = 16;
   dim3 blockSize(blockSize_x, blockSize_y);
-  int smcount = 0;
-  cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
+  int smcount = gcxx::Device::getAttribute(gcxx::flags::deviceAttribute::MultiProcessorCount);
   dim3 numBlocks(smcount, 10);
 
   // initialization
@@ -218,13 +28,14 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   VT curResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
 
   // main loop
-  for (size_t it = 0; it < maxIt; ++it) {
+  size_t it =0;
+  while(true) {
     nvtx3::scoped_range loop{"main loop"};
 
     nvtxRangePushA("Ap");
     // compute A * p
     applystencil<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    gcxx::Device::Synchronize();
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
@@ -236,13 +47,13 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // update solution
     nvtxRangePushA("solution");
     cgUpdateSol<VT><<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
     cgUpdateRes<VT><<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // compute residual norm
@@ -254,6 +65,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     if (sqrt(nextResSq) <= 1e-12)
       return it;
 
+    ++it;
     if (0 == it % 100)
       std::cout << "    " << it << " : " << sqrt(nextResSq) << std::endl;
 
@@ -266,7 +78,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // update p
     nvtxRangePushA("p");
     cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    gcxx::Device::Synchronize();
     nvtxRangePop();
   }
 
@@ -294,8 +106,8 @@ inline int realMain(int argc, char *argv[]) {
   auto rhs_span = gcxx::span{rhs.data(), nx * ny};
 
 
-  gcxx::memory::copy(u_span, u_host_span);
-  gcxx::memory::copy(rhs_span, rhs_host_span);
+  gcxx::memory::Copy(u_span, u_host_span);
+  gcxx::memory::Copy(rhs_span, rhs_host_span);
 
   auto res = gcxx::device_vector<VT>(nx * ny);
   auto res_span = gcxx::span(res.data(), nx * ny);
@@ -309,8 +121,8 @@ inline int realMain(int argc, char *argv[]) {
   gcxx::memory::Memset(ap_span, 0);
 
   // warm-up
-  nItWarmUp = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(),
-                                ap.data(), nx, ny, nItWarmUp);
+  // nItWarmUp = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(),
+  //                               ap.data(), nx, ny, nItWarmUp);
 
   // measurement
   auto start = std::chrono::steady_clock::now();
@@ -323,8 +135,8 @@ inline int realMain(int argc, char *argv[]) {
 
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 
-  gcxx::memory::copy(u_host_span, u_span);
-  gcxx::memory::copy(rhs_host_span, rhs_span);
+  gcxx::memory::Copy(u_host_span, u_span);
+  gcxx::memory::Copy(rhs_host_span, rhs_span);
 
 
   // check solution

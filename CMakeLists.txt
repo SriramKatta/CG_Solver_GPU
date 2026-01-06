@@ -21,7 +21,7 @@ add_executable(exe-main main.cu)
 target_link_libraries(exe-main PRIVATE CUDA::cudart)
 target_link_libraries(exe-main PRIVATE CCCL::CUB)
 target_link_libraries(exe-main PRIVATE CCCL::Thrust)
-target_link_libraries(exe-main PRIVATE nvtx3-c)
+target_link_libraries(exe-main PRIVATE nvtx3-cpp)
 target_link_libraries(exe-main PRIVATE gcxx::gcxx)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
