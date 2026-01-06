@@ -1,0 +1,8 @@
+CPMAddPackage(
+    NAME gcxx
+    GITHUB_REPOSITORY "SriramKatta/GCXX"
+    GIT_TAG "DEV"
+    OPTIONS
+    GCXX_CUDA_MODE ON
+    GCXX_WITH_EXCEPTIONS OFF
+)
