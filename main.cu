@@ -280,41 +280,43 @@ inline int realMain(int argc, char *argv[]) {
   parseCLA_2d(argc, argv, tpeName, nx, ny, nItWarmUp, nIt);
 
   auto u_host = gcxx::host_vector<VT>(nx * ny);
-  auto u_host_span = gcxx::span{u_host.data(), nx*ny};
+  auto u_host_span = gcxx::span{u_host.data(), nx * ny};
   auto rhs_host = gcxx::host_vector<VT>(nx * ny);
-  auto rhs_host_span = gcxx::span{rhs_host.data(), nx*ny};
+  auto rhs_host_span = gcxx::span{rhs_host.data(), nx * ny};
 
 
   // init
   initConjugateGradient(u_host.data(), rhs_host.data(), nx, ny);
 
   auto u = gcxx::device_vector<VT>(nx * ny);
-    auto u_span = gcxx::span{u.data(), nx*ny};
-    auto rhs = gcxx::device_vector<VT>(nx * ny);
-    auto rhs_span = gcxx::span{rhs.data(), nx*ny};
+  auto u_span = gcxx::span{u.data(), nx * ny};
+  auto rhs = gcxx::device_vector<VT>(nx * ny);
+  auto rhs_span = gcxx::span{rhs.data(), nx * ny};
 
 
   gcxx::memory::copy(u_span, u_host_span);
   gcxx::memory::copy(rhs_span, rhs_host_span);
 
-  auto res = gcxx::device_vector<VT>(nx*ny);
-  auto res_span = gcxx::span(res.data(), nx*ny);
-  auto p = gcxx::device_vector<VT>(nx*ny);
-  auto p_span = gcxx::span(p.data(), nx*ny);
-  auto ap = gcxx::device_vector<VT>(nx*ny);
-  auto ap_span = gcxx::span(ap.data(), nx*ny);
+  auto res = gcxx::device_vector<VT>(nx * ny);
+  auto res_span = gcxx::span(res.data(), nx * ny);
+  auto p = gcxx::device_vector<VT>(nx * ny);
+  auto p_span = gcxx::span(p.data(), nx * ny);
+  auto ap = gcxx::device_vector<VT>(nx * ny);
+  auto ap_span = gcxx::span(ap.data(), nx * ny);
 
   gcxx::memory::Memset(res_span, 0);
   gcxx::memory::Memset(p_span, 0);
   gcxx::memory::Memset(ap_span, 0);
 
   // warm-up
-  nItWarmUp = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(), ap.data(), nx, ny, nItWarmUp);
+  nItWarmUp = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(),
+                                ap.data(), nx, ny, nItWarmUp);
 
   // measurement
   auto start = std::chrono::steady_clock::now();
 
-  nIt = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(), ap.data(), nx, ny, nItWarmUp);
+  nIt = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(), ap.data(),
+                          nx, ny, nItWarmUp);
   std::cout << "  CG steps:      " << nIt << std::endl;
 
   auto end = std::chrono::steady_clock::now();
