@@ -23,7 +23,6 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   restrict_mdspan<VT> p_span{p, nx, ny};
   restrict_mdspan<VT> ap_span{ap, nx, ny};
 
-  constexpr auto blockSize_x = 32, blockSize_y = 16;
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = gcxx::Device::getAttribute(
     gcxx::flags::deviceAttribute::MultiProcessorCount);
@@ -72,8 +71,10 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     nvtxRangePop();
 
     // check exit criterion
-    if (sqrt(nextResSq) <= 1e-12)
+    if (sqrt(nextResSq) <= 1e-12){
+      gcxx::Device::Synchronize();
       return it;
+    }
 
     ++it;
     if (0 == it % 100)

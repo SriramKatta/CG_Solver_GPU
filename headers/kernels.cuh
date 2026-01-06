@@ -2,6 +2,10 @@
 
 #include <gcxx/api.hpp>
 
+#include <cub/cub.cuh>
+
+constexpr auto blockSize_x = 32, blockSize_y = 16;
+
 
 template <typename VT>
 using restrict_mdspan =
@@ -92,17 +96,6 @@ __global__ void residual_initp(VT *__restrict__ res, VT *__restrict__ p,
 
 
 template <typename VT>
-__inline__ __device__ void smem_reduce(VT *sdata, const int tid,
-                                       const int blockSize) {
-  for (int s = blockSize / 2; s > 0; s >>= 1) {
-    __syncthreads();
-    if (tid < s) {
-      sdata[tid] += sdata[tid + s];
-    }
-  }
-}
-
-template <typename VT>
 __device__ VT innerproduct_tile(const VT *A, const VT *B, size_t nx,
                                 size_t ny) {
   const int tx = threadIdx.x;
@@ -127,16 +120,20 @@ template <typename VT>
 __global__ void innerproduct(const VT *const __restrict__ A,
                              const VT *const __restrict__ B, VT *result,
                              size_t nx, size_t ny) {
-  VT *sdata = gcxx::dynamicSharedMemory<VT>();
-  const int tid = threadIdx.y * blockDim.x + threadIdx.x;
-  const int blockSize = blockDim.x * blockDim.y;
 
-  sdata[tid] = innerproduct_tile(A, B, nx, ny);
+  using blockreduce =
+    cub::BlockReduce<VT, blockSize_x,
+                     cub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS,
+                     blockSize_y>;
 
-  smem_reduce(sdata, tid, blockSize);
+  __shared__ typename blockreduce::TempStorage temp_storage;
 
-  if (tid == 0) {
-    atomicAdd(result, sdata[0]);
+  auto thread_sum = innerproduct_tile(A, B, nx, ny);
+
+  auto aggregate = blockreduce(temp_storage).Sum(thread_sum);
+  
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    atomicAdd(result, aggregate);
   }
 }
 
