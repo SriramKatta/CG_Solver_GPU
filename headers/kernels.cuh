@@ -131,9 +131,18 @@ __global__ void innerproduct(const VT *const __restrict__ A,
   auto thread_sum = innerproduct_tile(A, B, nx, ny);
 
   auto aggregate = blockreduce(temp_storage).Sum(thread_sum);
-  
+
   if (threadIdx.x == 0 && threadIdx.y == 0) {
     atomicAdd(result, aggregate);
+  }
+}
+
+template <typename VT>
+__global__ void devide_kernel(VT *res, VT *Numerator, VT *Denominator) {
+  const int ix = blockIdx.x * blockDim.x + threadIdx.x;
+  const int iy = blockIdx.y * blockDim.y + threadIdx.y;
+  if (ix == 0 && iy == 0) {
+    *res = (*Numerator) / (*Denominator);
   }
 }
 
