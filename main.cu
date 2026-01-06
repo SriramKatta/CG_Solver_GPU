@@ -3,6 +3,8 @@
 
 #include "cuda-util.h"
 
+#include <gcxx/api.hpp>
+
 #include <nvtx3/nvtx3.hpp>
 
 template <typename VT>
@@ -277,64 +279,62 @@ inline int realMain(int argc, char *argv[]) {
   size_t nx, ny, nItWarmUp, nIt;
   parseCLA_2d(argc, argv, tpeName, nx, ny, nItWarmUp, nIt);
 
-  VT *u_host;
-  VT *rhs_host;
-  checkCudaError(cudaMallocHost(&u_host, sizeof(VT) * nx * ny));
-  checkCudaError(cudaMallocHost(&rhs_host, sizeof(VT) * nx * ny));
+  auto u_host = gcxx::host_vector<VT>(nx * ny);
+  auto u_host_span = gcxx::span{u_host.data(), nx*ny};
+  auto rhs_host = gcxx::host_vector<VT>(nx * ny);
+  auto rhs_host_span = gcxx::span{rhs_host.data(), nx*ny};
+
 
   // init
-  initConjugateGradient(u_host, rhs_host, nx, ny);
+  initConjugateGradient(u_host.data(), rhs_host.data(), nx, ny);
 
-  VT *u;
-  VT *rhs;
-  checkCudaError(cudaMalloc(&u, sizeof(VT) * nx * ny));
-  checkCudaError(cudaMalloc(&rhs, sizeof(VT) * nx * ny));
-  checkCudaError(
-    cudaMemcpy(u, u_host, sizeof(VT) * nx * ny, cudaMemcpyHostToDevice));
-  checkCudaError(
-    cudaMemcpy(rhs, rhs_host, sizeof(VT) * nx * ny, cudaMemcpyHostToDevice));
+  auto u = gcxx::device_vector<VT>(nx * ny);
+    auto u_span = gcxx::span{u.data(), nx*ny};
+    auto rhs = gcxx::device_vector<VT>(nx * ny);
+    auto rhs_span = gcxx::span{rhs.data(), nx*ny};
 
-  VT *res;
-  checkCudaError(cudaMalloc(&res, sizeof(VT) * nx * ny));
-  VT *p;
-  checkCudaError(cudaMalloc(&p, sizeof(VT) * nx * ny));
-  VT *ap;
-  checkCudaError(cudaMalloc(&ap, sizeof(VT) * nx * ny));
 
-  checkCudaError(cudaMemset(res, 0, sizeof(VT) * nx * ny));
-  checkCudaError(cudaMemset(p, 0, sizeof(VT) * nx * ny));
-  checkCudaError(cudaMemset(ap, 0, sizeof(VT) * nx * ny));
+  gcxx::memory::copy(u_span, u_host_span);
+  gcxx::memory::copy(rhs_span, rhs_host_span);
+
+  auto res = gcxx::device_vector<VT>(nx*ny);
+  auto res_span = gcxx::span(res.data(), nx*ny);
+  auto p = gcxx::device_vector<VT>(nx*ny);
+  auto p_span = gcxx::span(p.data(), nx*ny);
+  auto ap = gcxx::device_vector<VT>(nx*ny);
+  auto ap_span = gcxx::span(ap.data(), nx*ny);
+
+  // checkCudaError(cudaMemset(res, 0, sizeof(VT) * nx * ny));
+  // checkCudaError(cudaMemset(p, 0, sizeof(VT) * nx * ny));
+  // checkCudaError(cudaMemset(ap, 0, sizeof(VT) * nx * ny));
+  gcxx::memory::Memset(res_span, 0);
+  gcxx::memory::Memset(p_span, 0);
+  gcxx::memory::Memset(ap_span, 0);
 
   // warm-up
-  nItWarmUp = conjugateGradient(rhs, u, res, p, ap, nx, ny, nItWarmUp);
+  nItWarmUp = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(), ap.data(), nx, ny, nItWarmUp);
 
   // measurement
   auto start = std::chrono::steady_clock::now();
 
-  nIt = conjugateGradient(rhs, u, res, p, ap, nx, ny, nIt);
+  nIt = conjugateGradient(rhs.data(), u.data(), res.data(), p.data(), ap.data(), nx, ny, nItWarmUp);
   std::cout << "  CG steps:      " << nIt << std::endl;
 
   auto end = std::chrono::steady_clock::now();
 
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 
-  checkCudaError(
-    cudaMemcpy(u_host, u, sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
-  checkCudaError(
-    cudaMemcpy(rhs_host, rhs, sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
+  // checkCudaError(
+  //   cudaMemcpy(u_host.data(), u.data(), sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
+  // checkCudaError(
+  //   cudaMemcpy(rhs_host.data(), rhs.data(), sizeof(VT) * nx * ny, cudaMemcpyDeviceToHost));
+  gcxx::memory::copy(u_host_span, u_span);
+  gcxx::memory::copy(rhs_host_span, rhs_span);
+
 
   // check solution
-  checkSolutionConjugateGradient(u_host, rhs_host, nx, ny);
+  checkSolutionConjugateGradient(u_host.data(), rhs_host.data(), nx, ny);
 
-  checkCudaError(cudaFree(res));
-  checkCudaError(cudaFree(p));
-  checkCudaError(cudaFree(ap));
-
-  checkCudaError(cudaFreeHost(u_host));
-  checkCudaError(cudaFreeHost(rhs_host));
-
-  checkCudaError(cudaFree(u));
-  checkCudaError(cudaFree(rhs));
 
   return 0;
 }
