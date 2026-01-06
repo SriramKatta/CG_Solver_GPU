@@ -1,11 +1,14 @@
 // V2 all gpu kernls only data moved once in each diection
 #include "cg-util.h"
 
+#include <string_view>
+
 #include <gcxx/api.hpp>
 
 #include <nvtx3/nvtx3.hpp>
 
 #include "kernels.cuh"
+
 
 template <typename VT>
 inline size_t conjugateGradient(const VT *const __restrict__ rhs,
@@ -14,27 +17,34 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 const size_t nx, const size_t ny,
                                 const size_t maxIt) {
 
+  restrict_mdspan<const VT> rhs_span{rhs, nx, ny};
+  restrict_mdspan<VT> u_span{u, nx, ny};
+  restrict_mdspan<VT> res_span{res, nx, ny};
+  restrict_mdspan<VT> p_span{p, nx, ny};
+  restrict_mdspan<VT> ap_span{ap, nx, ny};
+
   constexpr auto blockSize_x = 32, blockSize_y = 16;
   dim3 blockSize(blockSize_x, blockSize_y);
-  int smcount = gcxx::Device::getAttribute(gcxx::flags::deviceAttribute::MultiProcessorCount);
+  int smcount = gcxx::Device::getAttribute(
+    gcxx::flags::deviceAttribute::MultiProcessorCount);
   dim3 numBlocks(smcount, 10);
 
   // initialization
-  VT initResSq = (VT)0;
+  VT initResSq{};
 
-  residual_initp<VT><<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
+  residual_initp<<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
 
   // compute residual norm
   VT curResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
 
   // main loop
-  size_t it =0;
-  while(true) {
+  size_t it = 0;
+  while (true) {
     nvtx3::scoped_range loop{"main loop"};
 
     nvtxRangePushA("Ap");
     // compute A * p
-    applystencil<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
+    applystencil<<<numBlocks, blockSize>>>(p, ap, nx, ny);
     gcxx::Device::Synchronize();
     nvtxRangePop();
 
@@ -46,13 +56,13 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     // update solution
     nvtxRangePushA("solution");
-    cgUpdateSol<VT><<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
+    cgUpdateSol<<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
     gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
-    cgUpdateRes<VT><<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
+    cgUpdateRes<<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
     gcxx::Device::Synchronize();
     nvtxRangePop();
 
@@ -87,9 +97,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
 template <typename VT>
 inline int realMain(int argc, char *argv[]) {
-  char *tpeName;
-  size_t nx, ny, nItWarmUp, nIt;
-  parseCLA_2d(argc, argv, tpeName, nx, ny, nItWarmUp, nIt);
+  auto [tpeName, nx, ny, nItWarmUp, nIt] = parseCLA_2d(argc, argv);
 
   auto u_host = gcxx::host_vector<VT>(nx * ny);
   auto u_host_span = gcxx::span{u_host.data(), nx * ny};
@@ -152,7 +160,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  std::string tpeName(argv[1]);
+  std::string_view tpeName(argv[1]);
 
   if ("float" == tpeName)
     return realMain<float>(argc, argv);

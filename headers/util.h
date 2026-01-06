@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <string_view>
 
 
 #ifdef __NVCC__
@@ -14,7 +15,7 @@
 
 
 template<typename tpe>
-void printStats(const std::chrono::duration<double> elapsedSeconds, size_t nIt, size_t nCells, char* tpeName, size_t numBytesPerCell, size_t numFlopsPerCell) {
+void printStats(const std::chrono::duration<double> elapsedSeconds, size_t nIt, size_t nCells, std::string_view tpeName, size_t numBytesPerCell, size_t numFlopsPerCell) {
     std::cout << "  #cells / #it:  " << nCells << " / " << nIt << "\n";
     std::cout << "  type:          " << tpeName << "\n";
     std::cout << "  elapsed time:  " << 1e3 * elapsedSeconds.count() << " ms\n";

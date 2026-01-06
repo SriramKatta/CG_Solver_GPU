@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstring>
+#include <tuple>
+#include <string_view>
 
 #include "util.h"
 
@@ -60,13 +62,14 @@ void checkSolutionConjugateGradient(const tpe *const __restrict__ u, const tpe *
     std::cout << "  Final residual is " << res << std::endl;
 }
 
-inline void parseCLA_2d(int argc, char **argv, char *&tpeName, size_t &nx, size_t &ny, size_t &nItWarmUp, size_t &nIt) {
+inline std::tuple<std::string_view, size_t, size_t, size_t, size_t> parseCLA_2d(int argc, char **argv) {
     // default values
-    nx = 4096;
-    ny = 4096;
+    std::string_view tpeName;
+    size_t nx = 4096;
+    size_t ny = 4096;
 
-    nItWarmUp = 2;
-    nIt = 10;
+    size_t nItWarmUp = 2;
+    size_t nIt = 10;
 
     // override with command line arguments
     int i = 1;
@@ -86,4 +89,7 @@ inline void parseCLA_2d(int argc, char **argv, char *&tpeName, size_t &nx, size_
     if (argc > i)
         nIt = atoi(argv[i]);
     ++i;
+
+    
+    return {tpeName, nx, ny, nItWarmUp, nIt};
 }

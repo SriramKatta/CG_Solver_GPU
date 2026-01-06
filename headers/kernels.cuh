@@ -2,6 +2,12 @@
 
 #include <gcxx/api.hpp>
 
+
+template <typename VT>
+using restrict_mdspan =
+  gcxx::mdspan<VT, gcxx::dextents<int, 2>, gcxx::layout_right,
+               gcxx::restrict_accessor<VT>>;
+
 template <typename VT>
 __global__ void applystencil(const VT *const __restrict__ p,
                              VT *__restrict__ ap, const size_t nx,
