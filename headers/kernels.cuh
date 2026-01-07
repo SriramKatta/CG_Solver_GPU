@@ -10,7 +10,7 @@ constexpr auto blockSize_x = 32, blockSize_y = 16;
 template <typename VT>
 using restrict_mdspan =
   gcxx::mdspan<VT, gcxx::dextents<int, 2>, gcxx::layout_right,
-               gcxx::restrict_accessor<VT>>;
+               gcxx::restrict_accessor<gcxx::default_accessor<VT>>>;
 
 template <typename VT>
 __global__ void applystencil(const VT *const __restrict__ p,
