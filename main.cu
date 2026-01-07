@@ -17,12 +17,6 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 const size_t nx, const size_t ny,
                                 const size_t maxIt) {
 
-  restrict_mdspan<const VT> rhs_span{rhs, ny, nx};
-  restrict_mdspan<VT> u_span{u, ny, nx};
-  restrict_mdspan<VT> res_span{res, ny, nx};
-  restrict_mdspan<VT> p_span{p, ny, nx};
-  restrict_mdspan<VT> ap_span{ap, ny, nx};
-
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = gcxx::Device::getAttribute(
     gcxx::flags::deviceAttribute::MultiProcessorCount);
