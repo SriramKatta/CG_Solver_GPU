@@ -22,11 +22,14 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     gcxx::flags::deviceAttribute::MultiProcessorCount);
   dim3 numBlocks(smcount, 10);
 
+  gcxx::Stream str1;
   // initialization
-  residual_initp<<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
+  // residual_initp<<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
+  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, residual_initp<VT>, res,
+                       p, rhs, u, nx, ny);
 
   // compute residual norm
-  VT curResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
+  VT curResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize, str1);
 
   // main loop
   size_t it = 0;
@@ -35,35 +38,43 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     nvtxRangePushA("Ap");
     // compute A * p
-    applystencil<<<numBlocks, blockSize>>>(p, ap, nx, ny);
+    // applystencil<<<numBlocks, blockSize>>>(p, ap, nx, ny);
+    gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+                         nx, ny);
     gcxx::Device::Synchronize();
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
     VT alphaNominator = curResSq;
-    VT alphaDenominator = alphadencalc(p, ap, nx, ny, numBlocks, blockSize);
+    VT alphaDenominator =
+      alphadencalc(p, ap, nx, ny, numBlocks, blockSize, str1);
     VT alpha = alphaNominator / alphaDenominator;
     nvtxRangePop();
 
     // update solution
     nvtxRangePushA("solution");
-    cgUpdateSol<<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
+    // cgUpdateSol<<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
+    gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
+                         alpha, nx, ny);
     gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
-    cgUpdateRes<<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
+    // cgUpdateRes<<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
+    gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap,
+                         res, alpha, nx, ny);
+
     gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // compute residual norm
     nvtxRangePushA("resNorm");
-    VT nextResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize);
+    VT nextResSq = resnormsqcalc(res, nx, ny, numBlocks, blockSize, str1);
     nvtxRangePop();
 
     // check exit criterion
-    if (sqrt(nextResSq) <= 1e-12){
+    if (sqrt(nextResSq) <= 1e-12) {
       gcxx::Device::Synchronize();
       return it;
     }
@@ -80,7 +91,9 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     // update p
     nvtxRangePushA("p");
-    cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
+    // cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
+    gcxx::launch::Kernel(str1, numBlocks,blockSize, 0, cgUpdateP<VT>, beta, res,
+                         p, nx, ny);
     gcxx::Device::Synchronize();
     nvtxRangePop();
   }

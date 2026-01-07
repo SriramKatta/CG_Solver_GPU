@@ -148,26 +148,31 @@ __global__ void devide_kernel(VT *res, VT *Numerator, VT *Denominator) {
 
 template <typename VT>
 VT resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
-                 dim3 numblocks, dim3 blocksize) {
+                 dim3 numblocks, dim3 blocksize, gcxx::StreamView sv) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   auto ressqnorm_raii = gcxx::memory::make_device_managed_unique_ptr<VT>(1);
   gcxx::memory::Memset(ressqnorm_raii, 0, 1);
   VT *ressqnorm = ressqnorm_raii.get();
   VT hostressqnorm = 0.0;
-  innerproduct<<<numblocks, blocksize, smemsize>>>(res, res, ressqnorm, nx, ny);
+  // innerproduct<<<numblocks, blocksize, smemsize>>>(res, res, ressqnorm, nx, ny);
+  gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>,
+                       res, res, ressqnorm, nx, ny);
   gcxx::memory::Copy(&hostressqnorm, ressqnorm, 1);
   return hostressqnorm;
 }
 
 template <typename VT>
 VT alphadencalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
-                size_t nx, size_t ny, dim3 numblocks, dim3 blocksize) {
+                size_t nx, size_t ny, dim3 numblocks, dim3 blocksize,
+                gcxx::StreamView sv) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   auto alphaden_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
   gcxx::memory::Memset(alphaden_raii, 0, 1);
   VT *alphaden = alphaden_raii.get();
   VT hostalphaden = 1.0;
-  innerproduct<<<numblocks, blocksize, smemsize>>>(p, ap, alphaden, nx, ny);
+  // innerproduct<<<numblocks, blocksize, smemsize>>>(p, ap, alphaden, nx, ny);
+  gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>, p,
+                       ap, alphaden, nx, ny);
   gcxx::memory::Copy(&hostalphaden, alphaden, 1);
   return hostalphaden;
 }
