@@ -41,7 +41,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // applystencil<<<numBlocks, blockSize>>>(p, ap, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
                          nx, ny);
-    gcxx::Device::Synchronize();
+    // gcxx::Device::Synchronize();
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
@@ -56,7 +56,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // cgUpdateSol<<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
                          alpha, nx, ny);
-    gcxx::Device::Synchronize();
+    // gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // update residual
@@ -65,7 +65,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap,
                          res, alpha, nx, ny);
 
-    gcxx::Device::Synchronize();
+    // gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // compute residual norm
@@ -94,7 +94,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks,blockSize, 0, cgUpdateP<VT>, beta, res,
                          p, nx, ny);
-    gcxx::Device::Synchronize();
+    // gcxx::Device::Synchronize();
     nvtxRangePop();
   }
 
