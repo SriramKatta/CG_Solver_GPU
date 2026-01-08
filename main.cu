@@ -36,12 +36,11 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   while (true) {
     nvtx3::scoped_range loop{"main loop"};
 
+
     nvtxRangePushA("Ap");
     // compute A * p
-    // applystencil<<<numBlocks, blockSize>>>(p, ap, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
                          nx, ny);
-    // gcxx::Device::Synchronize();
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
@@ -53,19 +52,15 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     // update solution
     nvtxRangePushA("solution");
-    // cgUpdateSol<<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
                          alpha, nx, ny);
-    // gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
-    // cgUpdateRes<<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap,
                          res, alpha, nx, ny);
 
-    // gcxx::Device::Synchronize();
     nvtxRangePop();
 
     // compute residual norm
@@ -91,10 +86,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     // update p
     nvtxRangePushA("p");
-    // cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
     gcxx::launch::Kernel(str1, numBlocks,blockSize, 0, cgUpdateP<VT>, beta, res,
                          p, nx, ny);
-    // gcxx::Device::Synchronize();
     nvtxRangePop();
   }
 
