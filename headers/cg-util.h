@@ -70,7 +70,7 @@ inline std::tuple<std::string_view, size_t, size_t, size_t, size_t> parseCLA_2d(
     size_t ny = 4096;
 
     size_t nItWarmUp = 0;
-    size_t nIt = 20000;
+    size_t nIt = 200;
 
     // override with command line arguments
     int i = 1;

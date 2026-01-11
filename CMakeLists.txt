@@ -6,6 +6,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CUDA_ARCHITECTURES "80;86")
 
+set(CMAKE_BUILD_TYPE Debug)
+
 
 include(cmake/CPM.cmake)
 include(cmake/CCCL.cmake)
