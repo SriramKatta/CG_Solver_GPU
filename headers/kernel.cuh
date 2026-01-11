@@ -146,27 +146,68 @@ void resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
                    gcxx::StreamView sv) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   gcxx::memory::Memset(ressqnorm, 0, 1, sv);
-  innerproduct<<<numblocks, blocksize, smemsize, sv>>>(res, res, ressqnorm, nx,
-                                                       ny);
+  gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>,
+                       res, res, ressqnorm, nx, ny);
 }
 
 template <typename VT>
 void alphacalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
                size_t nx, size_t ny, dim3 numblocks, dim3 blocksize,
-               VT *alphanum, VT *alpha, gcxx::StreamView sv) {
+               VT *alphanum, VT *alphaden, VT *alpha, gcxx::StreamView sv) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
-  auto alphaden_raii = gcxx::memory::make_device_unique_ptr<VT>(1, sv);
-  gcxx::memory::Memset(alphaden_raii, 0, 1, sv);
-  VT *alphaden = alphaden_raii.get();
-  innerproduct<<<numblocks, blocksize, smemsize, sv>>>(p, ap, alphaden, nx, ny);
-  gpu_devide<<<1, 1, 0, sv>>>(alphanum, alphaden, alpha);
+  gcxx::memory::Memset(alphaden, 0, 1, sv);
+  gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>, p,
+                       ap, alphaden, nx, ny);
+  gcxx::launch::Kernel(sv, 1, 1, 0, gpu_devide<VT>, alphanum, alphaden, alpha);
 }
 
 template <typename VT>
-void core_CG(dim3 &numBlocks, dim3 &blockSize, gcxx::v1::Stream &str1,
-             VT *__restrict__ &p, VT *__restrict__ &ap, const size_t &nx,
-             const size_t &ny, VT *&curResSq, VT *&alpha, VT *__restrict__ &u,
-             VT *__restrict__ &res, VT *&nextResSq, VT *&beta);
+inline void core_CG(dim3 &numBlocks, dim3 &blockSize, gcxx::v1::Stream &str1,
+                    VT *__restrict__ &p, VT *__restrict__ &ap, const size_t &nx,
+                    const size_t &ny, VT *&curResSq, VT *&alphaden, VT *&alpha,
+                    VT *__restrict__ &u, VT *__restrict__ &res, VT *&nextResSq,
+                    VT *&beta) {
+  // compute A * p
+  nvtxRangePushA("Ap");
+  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+                       nx, ny);
+  nvtxRangePop();
+
+  nvtxRangePushA("alpha");
+  alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alphaden, alpha,
+            str1);
+  nvtxRangePop();
+
+  // update solution
+  nvtxRangePushA("solution");
+  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
+                       alpha, nx, ny);
+  nvtxRangePop();
+
+  // update residual
+  nvtxRangePushA("residual");
+  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap, res,
+                       alpha, nx, ny);
+  nvtxRangePop();
+
+  // compute residual norm
+  nvtxRangePushA("resNorm");
+  resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq, str1);
+  nvtxRangePop();
+
+  // compute beta
+  nvtxRangePushA("beta");
+  gcxx::launch::Kernel(str1, 1, 1, 0, gpu_devide<VT>, nextResSq, curResSq,
+                       beta);
+  gcxx::memory::Copy(curResSq, nextResSq, 1, str1);
+  nvtxRangePop();
+
+  // update p
+  nvtxRangePushA("p");
+  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateP<VT>, beta, res,
+                       p, nx, ny);
+  nvtxRangePop();
+}
 
 template <typename VT>
 inline size_t conjugateGradient(const VT *const __restrict__ rhs,
@@ -180,7 +221,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
   dim3 numBlocks(smcount, 10);
 
-  residual_initp<VT><<<numBlocks, blockSize>>>(res, p, rhs, u, nx, ny);
+  gcxx::launch::Kernel(numBlocks, blockSize, residual_initp<VT>, res, p, rhs, u,
+                       nx, ny);
 
   auto nextResSq_raii = gcxx::memory::make_device_managed_unique_ptr<VT>(1);
 
@@ -194,6 +236,9 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   gcxx::memory::Memset(nextResSq_raii, 0, 1);
   gcxx::memory::Memset(alpha_raii, 0, 1);
   gcxx::memory::Memset(beta_raii, 0, 1);
+
+  auto alphaden_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
+  VT *alphaden = alphaden_raii.get();
 
   gcxx::Stream str1(gcxx::flags::streamType::SyncWithNull);
 
@@ -215,8 +260,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     if (!isgraphbuilt) {
       gcxx::Graph graph;
       str1.BeginCaptureToGraph(graph, gcxx::flags::streamCaptureMode::Global);
-      core_CG(numBlocks, blockSize, str1, p, ap, nx, ny, curResSq, alpha, u,
-              res, nextResSq, beta);
+      core_CG(numBlocks, blockSize, str1, p, ap, nx, ny, curResSq, alphaden,
+              alpha, u, res, nextResSq, beta);
       str1.EndCaptureToGraph(graph);
       exec = graph.Instantiate();
       isgraphbuilt = true;
@@ -235,48 +280,4 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   }
 
   return maxIt;
-}
-
-template <typename VT>
-inline void core_CG(dim3 &numBlocks, dim3 &blockSize, gcxx::v1::Stream &str1,
-                    VT *__restrict__ &p, VT *__restrict__ &ap, const size_t &nx,
-                    const size_t &ny, VT *&curResSq, VT *&alpha,
-                    VT *__restrict__ &u, VT *__restrict__ &res, VT *&nextResSq,
-                    VT *&beta) {
-  // compute A * p
-  nvtxRangePushA("Ap");
-  applystencil<VT><<<numBlocks, blockSize, 0, str1>>>(p, ap, nx, ny);
-  nvtxRangePop();
-
-  nvtxRangePushA("alpha");
-  alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alpha, str1);
-  nvtxRangePop();
-
-  // update solution
-  nvtxRangePushA("solution");
-  cgUpdateSol<VT><<<numBlocks, blockSize, 0, str1>>>(p, u, alpha, nx, ny);
-  nvtxRangePop();
-
-  // update residual
-  nvtxRangePushA("residual");
-  cgUpdateRes<VT><<<numBlocks, blockSize, 0, str1>>>(ap, res, alpha, nx, ny);
-  nvtxRangePop();
-
-  // compute residual norm
-  nvtxRangePushA("resNorm");
-  resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq, str1);
-  nvtxRangePop();
-
-  // compute beta
-  nvtxRangePushA("beta");
-  // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
-  gpu_devide<<<1, 1, 0, str1>>>(nextResSq, curResSq, beta);
-  // cudaMemcpy(curResSq, nextResSq, sizeof(VT), cudaMemcpyDeviceToDevice);
-  gcxx::memory::Copy(curResSq, nextResSq, 1, str1);
-  nvtxRangePop();
-
-  // update p
-  nvtxRangePushA("p");
-  cgUpdateP<<<numBlocks, blockSize, 0, str1>>>(beta, res, p, nx, ny);
-  nvtxRangePop();
 }
