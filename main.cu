@@ -3,7 +3,12 @@
 
 #include "cuda-util.h"
 
+#include <cub/block/block_reduce.cuh>
+
 #include <nvtx3/nvtx3.hpp>
+
+
+constexpr auto blockSize_x = 32, blockSize_y = 16;
 
 template <typename VT>
 __global__ void applystencil(const VT *const __restrict__ p,
@@ -87,47 +92,9 @@ __global__ void residual_initp(VT *__restrict__ res, VT *__restrict__ p,
     }
 }
 
-template <class VT>
-struct SharedMemory {
-  __device__ inline operator VT *() {
-    extern __shared__ int __smem[];
-    return (VT *)__smem;
-  }
-
-  __device__ inline operator const VT *() const {
-    extern __shared__ int __smem[];
-    return (VT *)__smem;
-  }
-};
-
-// specialize for double to avoid unaligned memory
-// access compile errors
-template <>
-struct SharedMemory<double> {
-  __device__ inline operator double *() {
-    extern __shared__ double __smem_d[];
-    return (double *)__smem_d;
-  }
-
-  __device__ inline operator const double *() const {
-    extern __shared__ double __smem_d[];
-    return (double *)__smem_d;
-  }
-};
-
 template <typename VT>
-__inline__ __device__ void smem_reduce(VT *sdata, const int tid,
-                                       const int blockSize) {
-  for (int s = blockSize / 2; s > 0; s >>= 1) {
-    __syncthreads();
-    if (tid < s) {
-      sdata[tid] += sdata[tid + s];
-    }
-  }
-}
-
-template <typename VT>
-__device__ VT innerproduct_tile(const VT *A, const VT *B, size_t nx,
+__device__ VT innerproduct_tile(const VT *__restrict__ A,
+                                const VT *__restrict__ B, size_t nx,
                                 size_t ny) {
   const int tx = threadIdx.x;
   const int ty = threadIdx.y;
@@ -151,22 +118,23 @@ template <typename VT>
 __global__ void innerproduct(const VT *const __restrict__ A,
                              const VT *const __restrict__ B, VT *result,
                              size_t nx, size_t ny) {
-  VT *sdata = SharedMemory<VT>();
-  const int tid = threadIdx.y * blockDim.x + threadIdx.x;
-  const int blockSize = blockDim.x * blockDim.y;
+  using block_reduce =
+    cub::BlockReduce<VT, blockSize_x, cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                     blockSize_y>;
 
-  sdata[tid] = innerproduct_tile(A, B, nx, ny);
+  __shared__ typename block_reduce::TempStorage tempstore;
 
-  smem_reduce(sdata, tid, blockSize);
+  auto thread_data = innerproduct_tile(A, B, nx, ny);
 
-  if (tid == 0) {
-    atomicAdd(result, sdata[0]);
+  auto blocksum = block_reduce(tempstore).Sum(thread_data);
+
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    atomicAdd(result, blocksum);
   }
 }
 
 template <typename VT>
-__global__ void gpu_devide(const VT *const num, const VT *const den,
-                           VT * res) {
+__global__ void gpu_devide(const VT *const num, const VT *const den, VT *res) {
 
   if (threadIdx.x == 0) {
     *res = (*num) / (*den);
@@ -201,7 +169,6 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 const size_t nx, const size_t ny,
                                 const size_t maxIt) {
 
-  constexpr auto blockSize_x = 32, blockSize_y = 16;
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = 0;
   cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
@@ -232,41 +199,36 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   for (size_t it = 0; it < maxIt; ++it) {
     nvtx3::scoped_range loop{"main loop"};
 
-    nvtxRangePushA("Ap");
     // compute A * p
+    nvtxRangePushA("Ap");
     applystencil<VT><<<numBlocks, blockSize>>>(p, ap, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     nvtxRangePushA("alpha");
-    //VT alphaNominator = curResSq;
-    //VT alphaDenominator =
     alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alpha);
-    //VT alpha = alphaNominator / alphaDenominator;
     nvtxRangePop();
 
     // update solution
     nvtxRangePushA("solution");
     cgUpdateSol<VT><<<numBlocks, blockSize>>>(p, u, alpha, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // update residual
     nvtxRangePushA("residual");
     cgUpdateRes<VT><<<numBlocks, blockSize>>>(ap, res, alpha, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
 
     // compute residual norm
     nvtxRangePushA("resNorm");
-    //VT nextResSq =
     resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq);
     nvtxRangePop();
 
     // check exit criterion
     cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
-    if (sqrt(*nextResSq) <= 1e-12)
+    checkCudaError(cudaDeviceSynchronize()); // Add this!
+    if (sqrt(*nextResSq) <= 1e-12) {
       return it;
+    }
 
     if (0 == it % 100)
       std::cout << "    " << it << " : " << sqrt(*nextResSq) << std::endl;
@@ -274,16 +236,14 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     // compute beta
     cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
     nvtxRangePushA("beta");
-    gpu_devide<<<1,1>>>(nextResSq, curResSq, beta);
-    //VT beta = nextResSq / curResSq;
+    gpu_devide<<<1, 1>>>(nextResSq, curResSq, beta);
     cudaMemcpy(curResSq, nextResSq, sizeof(VT), cudaMemcpyDeviceToDevice);
-    //curResSq = nextResSq;
     nvtxRangePop();
 
     // update p
     nvtxRangePushA("p");
     cgUpdateP<<<numBlocks, blockSize>>>(beta, res, p, nx, ny);
-    checkCudaError(cudaDeviceSynchronize());
+    // checkCudaError(cudaDeviceSynchronize());
     nvtxRangePop();
   }
 
@@ -331,9 +291,9 @@ inline int realMain(int argc, char *argv[]) {
   auto start = std::chrono::steady_clock::now();
 
   nIt = conjugateGradient(rhs, u, res, p, ap, nx, ny, nIt);
-  std::cout << "  CG steps:      " << nIt << std::endl;
 
   auto end = std::chrono::steady_clock::now();
+  std::cout << "  CG steps:      " << nIt << std::endl;
 
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 

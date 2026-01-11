@@ -65,8 +65,8 @@ inline void parseCLA_2d(int argc, char **argv, char *&tpeName, size_t &nx, size_
     nx = 4096;
     ny = 4096;
 
-    nItWarmUp = 2;
-    nIt = 10;
+    nItWarmUp = 0;
+    nIt = 20000;
 
     // override with command line arguments
     int i = 1;
@@ -86,4 +86,9 @@ inline void parseCLA_2d(int argc, char **argv, char *&tpeName, size_t &nx, size_
     if (argc > i)
         nIt = atoi(argv[i]);
     ++i;
+
+    std::cout << "nx = " << nx << "\n"
+              << "ny = " << ny << "\n"
+              << "nItWarmUp = " << nItWarmUp << "\n"
+              << "nIt = " << nIt<<std::endl;
 }
