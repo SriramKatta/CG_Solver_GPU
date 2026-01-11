@@ -1,33 +1,40 @@
 #pragma once
 
+#include <fmt/format.h>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <iostream>
+#include <string_view>
 
 
 #ifdef __NVCC__
-#   define FCT_DECORATOR __host__ __device__
+#define FCT_DECORATOR __host__ __device__
 #else
-#   define FCT_DECORATOR
+#define FCT_DECORATOR
 #endif
 
 
-template<typename tpe>
-void printStats(const std::chrono::duration<double> elapsedSeconds, size_t nIt, size_t nCells, char* tpeName, size_t numBytesPerCell, size_t numFlopsPerCell) {
-    std::cout << "  #cells / #it:  " << nCells << " / " << nIt << "\n";
-    std::cout << "  type:          " << tpeName << "\n";
-    std::cout << "  elapsed time:  " << 1e3 * elapsedSeconds.count() << " ms\n";
-    std::cout << "  per iteration: " << 1e3 * elapsedSeconds.count() / nIt << " ms\n";
-    std::cout << "  MLUP/s:        " << 1e-6 * nCells * nIt / elapsedSeconds.count() << "\n";
-    std::cout << "  bandwidth:     " << 1e-9 * numBytesPerCell * nCells * nIt / elapsedSeconds.count() << " GB/s\n";
-    std::cout << "  compute:       " << 1e-9 * numFlopsPerCell * nCells * nIt / elapsedSeconds.count() << " GFLOP/s\n";
+template <typename tpe>
+void printStats(const std::chrono::duration<double> elapsedSeconds, size_t nIt,
+                size_t nCells, std::string_view tpeName, size_t numBytesPerCell,
+                size_t numFlopsPerCell) {
+  fmt::print("  #cells / #it:  {} / {}\n", nCells, nIt);
+  fmt::print("  type:          {}\n", tpeName);
+  fmt::print("  elapsed time:  {:.3f} ms\n", 1e3 * elapsedSeconds.count());
+  fmt::print("  per iteration: {:.3f} ms\n",
+             1e3 * elapsedSeconds.count() / nIt);
+  fmt::print("  MLUP/s:        {:.3f}\n",
+             1e-6 * nCells * nIt / elapsedSeconds.count());
+  fmt::print("  bandwidth:     {:.3f} GB/s\n",
+             1e-9 * numBytesPerCell * nCells * nIt / elapsedSeconds.count());
+  fmt::print("  compute:       {:.3f} GFLOP/s\n",
+             1e-9 * numFlopsPerCell * nCells * nIt / elapsedSeconds.count());
 }
 
 FCT_DECORATOR size_t ceilingDivide(size_t a, size_t b) {
-    return (a + b - 1) / b;
+  return (a + b - 1) / b;
 }
 
 FCT_DECORATOR size_t ceilToMultipleOf(size_t a, size_t b) {
-    return ceilingDivide(a, b) * b;
+  return ceilingDivide(a, b) * b;
 }

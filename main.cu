@@ -5,7 +5,11 @@
 
 #include <cub/block/block_reduce.cuh>
 
+#include <fmt/format.h>
 #include <nvtx3/nvtx3.hpp>
+#include <string_view>
+
+#include <gcxx/api.hpp>
 
 
 constexpr auto blockSize_x = 32, blockSize_y = 16;
@@ -225,13 +229,13 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
     // check exit criterion
     cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
-    checkCudaError(cudaDeviceSynchronize()); // Add this!
+    checkCudaError(cudaDeviceSynchronize());  // Add this!
     if (sqrt(*nextResSq) <= 1e-12) {
       return it;
     }
 
     if (0 == it % 100)
-      std::cout << "    " << it << " : " << sqrt(*nextResSq) << std::endl;
+      fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
 
     // compute beta
     cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId);
@@ -252,9 +256,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
 template <typename VT>
 inline int realMain(int argc, char *argv[]) {
-  char *tpeName;
-  size_t nx, ny, nItWarmUp, nIt;
-  parseCLA_2d(argc, argv, tpeName, nx, ny, nItWarmUp, nIt);
+  auto [tpeName, nx, ny, nItWarmUp, nIt] = parseCLA_2d(argc, argv);
 
   VT *u_host;
   VT *rhs_host;
@@ -293,7 +295,7 @@ inline int realMain(int argc, char *argv[]) {
   nIt = conjugateGradient(rhs, u, res, p, ap, nx, ny, nIt);
 
   auto end = std::chrono::steady_clock::now();
-  std::cout << "  CG steps:      " << nIt << std::endl;
+  fmt::print("  CG steps:      {}\n", nIt);
 
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 
@@ -319,20 +321,21 @@ inline int realMain(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-  //if (argc < 2) {
-  //  std::cout << "Missing type specification " << std::endl;
-  //  return 1;
-  //}
 
-  std::string tpeName(argv[1]);
+  std::string_view tpeName;
+
+  if (argc < 2) {
+    fmt::print("Missing type specification using double");
+    tpeName = "double";
+  }
+
+  tpeName = argv[1];
 
   if ("float" == tpeName)
     return realMain<float>(argc, argv);
-  if ("double" == tpeName || tpeName.empty())
+  if ("double" == tpeName)
     return realMain<double>(argc, argv);
 
-  std::cout << "Invalid type specification (" << argv[1]
-            << "); supported types are" << std::endl;
-  std::cout << "  float, double" << std::endl;
+  fmt::print("Invalid type specification ({})\n\tfloat, double", tpeName);
   return -1;
 }
