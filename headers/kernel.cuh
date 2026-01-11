@@ -162,11 +162,28 @@ void alphacalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
 }
 
 template <typename VT>
-inline void core_CG(dim3 &numBlocks, dim3 &blockSize, gcxx::v1::Stream &str1,
-                    VT *__restrict__ &p, VT *__restrict__ &ap, const size_t &nx,
-                    const size_t &ny, VT *&curResSq, VT *&alphaden, VT *&alpha,
+__global__ void cond_kernel(gcxx::deviceGraphConditionalHandle_t hand,
+                            VT *res_sq, size_t *iter, size_t maxiter) {
+  if (threadIdx.x != 0)
+    return;
+  ++(*iter);
+#if DEBUG
+  if ((*iter) % 100 == 0) {
+    printf("  %ld : %f\n", *iter, sqrt(*res_sq));
+  }
+#endif
+  // Check if we should stop
+  if (sqrt(*res_sq) < 1e-12 || *iter >= maxiter) {
+    gcxx::Graph::SetConditional(hand, 0);  // Stop the loop
+  }
+}
+
+template <typename VT>
+inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
+                    VT *__restrict__ &ap, const size_t &nx, const size_t &ny,
+                    VT *&curResSq, VT *&alphaden, VT *&alpha,
                     VT *__restrict__ &u, VT *__restrict__ &res, VT *&nextResSq,
-                    VT *&beta) {
+                    VT *&beta, gcxx::StreamView str1) {
   // compute A * p
   nvtxRangePushA("Ap");
   gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
@@ -247,37 +264,51 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   VT *alpha = alpha_raii.get();
   VT *beta = beta_raii.get();
 
+  auto iter_raii = gcxx::memory::make_device_unique_ptr<size_t>(1);
+  gcxx::memory::Memset(iter_raii, 0, 1);
+  size_t *iter = iter_raii.get();
+
   // compute residual norm
   resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1);
 
-  bool isgraphbuilt = false;
-  gcxx::GraphExec exec;
+  // bool isgraphbuilt = false;
+  gcxx::Graph graph;
+
+  auto hand = graph.CreateConditionalHandle(
+    1, gcxx::flags::graphConditionalHandle::Default);
+
+  auto [condnode, whilegraph] = graph.AddWhileNode(hand);
 
   // main loop
-  for (size_t it = 0; it < maxIt; ++it) {
-    nvtx3::scoped_range loop{"main loop"};
 
-    if (!isgraphbuilt) {
-      gcxx::Graph graph;
-      str1.BeginCaptureToGraph(graph, gcxx::flags::streamCaptureMode::Global);
-      core_CG(numBlocks, blockSize, str1, p, ap, nx, ny, curResSq, alphaden,
-              alpha, u, res, nextResSq, beta);
-      str1.EndCaptureToGraph(graph);
-      exec = graph.Instantiate();
-      isgraphbuilt = true;
-    }
+  // if (!isgraphbuilt) {
+  //   gcxx::Graph
+  //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
+  str1.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
+  core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
+          res, nextResSq, beta, str1);
+  gcxx::launch::Kernel(str1, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
+                       maxIt);
+  str1.EndCaptureToGraph(whilegraph);
+  gcxx::GraphExec exec = graph.Instantiate();
+  // isgraphbuilt = true;
+  // }
 
-    exec.Launch(str1);
+  exec.Launch(str1);
+  str1.Synchronize();
 
-    // check exit criterion
-    cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
-    str1.Synchronize();  // Needed
-    if (sqrt(*nextResSq) <= 1e-12) {
-      return it;
-    }
-    if (0 == it % 100)
-      fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
-  }
+  // check exit criterion
+  // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
+  // str1.Synchronize();  // Needed
+  // if (sqrt(*nextResSq) <= 1e-12) {
+  //   return it;
+  // }
+  // if (0 == it % 100)
+  //   fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
+  // }
 
-  return maxIt;
+  size_t ithost{};
+  gcxx::memory::Copy(&ithost, iter, 1);
+
+  return ithost;
 }
