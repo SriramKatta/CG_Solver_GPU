@@ -8,6 +8,7 @@ set(CMAKE_CUDA_ARCHITECTURES "80;86")
 
 set(CMAKE_BUILD_TYPE Release)
 
+set(NVTX_MARK_OFF ON)
 
 include(cmake/CPM.cmake)
 include(cmake/CCCL.cmake)
@@ -18,6 +19,9 @@ include(cmake/FMT.cmake)
 include_directories(headers)
 
 add_executable(exe-main main.cu)
+if(NVTX_MARK_OFF)
+    target_compile_definitions(exe-main PUBLIC NVTX_DISABLE)
+endif()
 target_link_libraries(exe-main PRIVATE CCCL::CUB)
 target_link_libraries(exe-main PRIVATE nvtx3-cpp)
 target_link_libraries(exe-main PRIVATE gcxx::gcxx)

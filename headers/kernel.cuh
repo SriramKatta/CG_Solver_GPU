@@ -184,6 +184,8 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
                     VT *&curResSq, VT *&alphaden, VT *&alpha,
                     VT *__restrict__ &u, VT *__restrict__ &res, VT *&nextResSq,
                     VT *&beta, gcxx::StreamView str1) {
+
+  nvtx3::scoped_range range{"main_loop"};
   // compute A * p
   nvtxRangePushA("Ap");
   gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
