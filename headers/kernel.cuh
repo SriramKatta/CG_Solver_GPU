@@ -183,49 +183,56 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
                     VT *__restrict__ &ap, const size_t &nx, const size_t &ny,
                     VT *&curResSq, VT *&alphaden, VT *&alpha,
                     VT *__restrict__ &u, VT *__restrict__ &res, VT *&nextResSq,
-                    VT *&beta, gcxx::StreamView str1) {
+                    VT *&beta, gcxx::StreamView str1, gcxx::StreamView str2, gcxx::StreamView str3) {
 
   nvtx3::scoped_range range{"main_loop"};
-  // compute A * p
+  // compute A * p (stream 1)
   nvtxRangePushA("Ap");
   gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
                        nx, 0, ny);
   nvtxRangePop();
 
+  // alpha calculation depends on Ap (stream 1)
   nvtxRangePushA("alpha");
   alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alphaden, alpha,
             str1);
   nvtxRangePop();
 
-  // update solution
+  // update solution (stream 2 - depends on alpha)
   nvtxRangePushA("solution");
-  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
+  str2.WaitOnEvent(str1.RecordEvent());
+  gcxx::launch::Kernel(str2, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
                        alpha, nx, ny);
   nvtxRangePop();
 
-  // update residual
+  // update residual (stream 3 - depends on alpha, parallel with solution update)
   nvtxRangePushA("residual");
-  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap, res,
+  str3.WaitOnEvent(str1.RecordEvent());
+  gcxx::launch::Kernel(str3, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap, res,
                        alpha, nx, ny);
   nvtxRangePop();
 
-  // compute residual norm
+  // compute residual norm (stream 3 - depends on residual update)
   nvtxRangePushA("resNorm");
-  resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq, str1);
+  resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq, str3);
   nvtxRangePop();
 
-  // compute beta
+  // compute beta (stream 1 - depends on residual norm)
   nvtxRangePushA("beta");
+  str1.WaitOnEvent(str3.RecordEvent());
   gcxx::launch::Kernel(str1, 1, 1, 0, gpu_devide<VT>, nextResSq, curResSq,
                        beta);
   gcxx::memory::Copy(curResSq, nextResSq, 1, str1);
   nvtxRangePop();
 
-  // update p
+  // update p (stream 1 - depends on beta)
   nvtxRangePushA("p");
   gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateP<VT>, beta, res,
                        p, nx, ny);
   nvtxRangePop();
+  
+  // Synchronize stream 1 to ensure all dependencies are met for next iteration
+  str1.WaitOnEvent(str2.RecordEvent());
 }
 
 template <typename VT>
@@ -259,7 +266,10 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   auto alphaden_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
   VT *alphaden = alphaden_raii.get();
 
+  // Create multiple streams for parallelization
   gcxx::Stream str1(gcxx::flags::streamType::SyncWithNull);
+  gcxx::Stream str2(gcxx::flags::streamType::SyncWithNull);
+  gcxx::Stream str3(gcxx::flags::streamType::SyncWithNull);
 
   VT *curResSq = curResSq_raii.get();
   VT *nextResSq = nextResSq_raii.get();
@@ -288,7 +298,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
   str1.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
   core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
-          res, nextResSq, beta, str1);
+          res, nextResSq, beta, str1, str2, str3);
   gcxx::launch::Kernel(str1, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
                        maxIt);
   str1.EndCaptureToGraph(whilegraph);
@@ -296,11 +306,11 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   // isgraphbuilt = true;
   // }
 
-  // exec.Launch(str1);
-  // str1.Synchronize();
-
+  exec.Launch(str1);
+  
   graph.SaveDotfile("./test_verbose.dot", gcxx::flags::graphDebugDot::Verbose);
-  graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
+  // graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
+  str1.Synchronize();
 
   // check exit criterion
   // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
