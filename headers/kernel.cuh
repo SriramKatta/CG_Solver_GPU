@@ -13,13 +13,13 @@ constexpr auto blockSize_x = 32, blockSize_y = 16;
 template <typename VT>
 __global__ void applystencil(const VT *const __restrict__ p,
                              VT *__restrict__ ap, const size_t nx,
-                             const size_t ny) {
+                             const size_t iy_start, const size_t iy_end) {
   size_t gridStartX = blockIdx.x * blockDim.x + threadIdx.x + 1;
   size_t gridStrideX = gridDim.x * blockDim.x;
-  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + iy_start;
   size_t gridStrideY = gridDim.y * blockDim.y;
 
-  for (size_t j = gridStartY; j < ny - 1; j += gridStrideY)
+  for (size_t j = gridStartY; j < iy_end - 1; j += gridStrideY)
     for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
       ap[j * nx + i] =
         4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
@@ -189,7 +189,7 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
   // compute A * p
   nvtxRangePushA("Ap");
   gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
-                       nx, ny);
+                       nx, 0, ny);
   nvtxRangePop();
 
   nvtxRangePushA("alpha");
@@ -296,8 +296,11 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   // isgraphbuilt = true;
   // }
 
-  exec.Launch(str1);
-  str1.Synchronize();
+  // exec.Launch(str1);
+  // str1.Synchronize();
+
+  graph.SaveDotfile("./test_verbose.dot", gcxx::flags::graphDebugDot::Verbose);
+  graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
 
   // check exit criterion
   // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
