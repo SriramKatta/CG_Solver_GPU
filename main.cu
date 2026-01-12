@@ -16,7 +16,8 @@ inline int realMain(int argc, char *argv[]) {
   auto total_elems = nx * ny;
 
   auto u_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(total_elems);
-  auto rhs_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(total_elems);
+  auto rhs_host_raii =
+    gcxx::memory::make_host_pinned_unique_ptr<VT>(total_elems);
 
   VT *u_host = u_host_raii.get();
   VT *rhs_host = rhs_host_raii.get();
