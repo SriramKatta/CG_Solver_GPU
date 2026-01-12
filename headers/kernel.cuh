@@ -19,12 +19,32 @@ __global__ void applystencil(const VT *const __restrict__ p,
   size_t gridStartY = blockIdx.y * blockDim.y + threadIdx.y + iy_start;
   size_t gridStrideY = gridDim.y * blockDim.y;
 
-  for (size_t j = gridStartY; j < iy_end - 1; j += gridStrideY)
+  for (size_t j = gridStartY; j < iy_end; j += gridStrideY)
     for (size_t i = gridStartX; i < nx - 1; i += gridStrideX) {
       ap[j * nx + i] =
         4 * p[j * nx + i] - (p[j * nx + i - 1] + p[j * nx + i + 1] +
                              p[(j - 1) * nx + i] + p[(j + 1) * nx + i]);
     }
+}
+
+template <typename VT>
+void launch_apply_stencil(gcxx::StreamView str1l, gcxx::StreamView str1h,
+                          dim3 numBlocks, dim3 blockSize, VT *__restrict__ &p,
+                          VT *__restrict__ &ap, size_t nx, size_t ny) {
+  // needed since all streams are indepenedent  and may result in unconnected graph nodes
+  str1h.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
+
+  // external edges // to implement edge comm
+  gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+                       nx, 0, 1);
+  gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+                       nx, ny - 2, ny - 1);
+  
+
+  // internal block
+  gcxx::launch::Kernel(str1l, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+                       nx, 1, ny - 2);
+  str1l.WaitOnEvent(str1h.RecordEvent(gcxx::flags::eventCreate::disableTiming));
 }
 
 template <typename VT>
@@ -167,7 +187,7 @@ __global__ void cond_kernel(gcxx::deviceGraphConditionalHandle_t hand,
   if (threadIdx.x != 0)
     return;
   ++(*iter);
-#if DEBUG
+#if !defined(DEBUG)
   if ((*iter) % 100 == 0) {
     printf("  %ld : %f\n", *iter, sqrt(*res_sq));
   }
@@ -183,31 +203,31 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
                     VT *__restrict__ &ap, const size_t &nx, const size_t &ny,
                     VT *&curResSq, VT *&alphaden, VT *&alpha,
                     VT *__restrict__ &u, VT *__restrict__ &res, VT *&nextResSq,
-                    VT *&beta, gcxx::StreamView str1, gcxx::StreamView str2, gcxx::StreamView str3) {
+                    VT *&beta, gcxx::StreamView str1l, gcxx::StreamView str1h,
+                    gcxx::StreamView str2, gcxx::StreamView str3) {
 
   nvtx3::scoped_range range{"main_loop"};
   // compute A * p (stream 1)
   nvtxRangePushA("Ap");
-  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
-                       nx, 0, ny);
+  launch_apply_stencil(str1l, str1h, numBlocks, blockSize, p, ap, nx, ny);
   nvtxRangePop();
 
   // alpha calculation depends on Ap (stream 1)
   nvtxRangePushA("alpha");
   alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alphaden, alpha,
-            str1);
+            str1l);
   nvtxRangePop();
 
   // update solution (stream 2 - depends on alpha)
   nvtxRangePushA("solution");
-  str2.WaitOnEvent(str1.RecordEvent());
+  str2.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
   gcxx::launch::Kernel(str2, numBlocks, blockSize, 0, cgUpdateSol<VT>, p, u,
                        alpha, nx, ny);
   nvtxRangePop();
 
   // update residual (stream 3 - depends on alpha, parallel with solution update)
   nvtxRangePushA("residual");
-  str3.WaitOnEvent(str1.RecordEvent());
+  str3.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
   gcxx::launch::Kernel(str3, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap, res,
                        alpha, nx, ny);
   nvtxRangePop();
@@ -219,20 +239,20 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
 
   // compute beta (stream 1 - depends on residual norm)
   nvtxRangePushA("beta");
-  str1.WaitOnEvent(str3.RecordEvent());
-  gcxx::launch::Kernel(str1, 1, 1, 0, gpu_devide<VT>, nextResSq, curResSq,
+  str1l.WaitOnEvent(str3.RecordEvent(gcxx::flags::eventCreate::disableTiming));
+  gcxx::launch::Kernel(str1l, 1, 1, 0, gpu_devide<VT>, nextResSq, curResSq,
                        beta);
-  gcxx::memory::Copy(curResSq, nextResSq, 1, str1);
+  gcxx::memory::Copy(curResSq, nextResSq, 1, str1l);
   nvtxRangePop();
 
   // update p (stream 1 - depends on beta)
   nvtxRangePushA("p");
-  gcxx::launch::Kernel(str1, numBlocks, blockSize, 0, cgUpdateP<VT>, beta, res,
+  gcxx::launch::Kernel(str1l, numBlocks, blockSize, 0, cgUpdateP<VT>, beta, res,
                        p, nx, ny);
   nvtxRangePop();
-  
+
   // Synchronize stream 1 to ensure all dependencies are met for next iteration
-  str1.WaitOnEvent(str2.RecordEvent());
+  str1l.WaitOnEvent(str2.RecordEvent(gcxx::flags::eventCreate::disableTiming));
 }
 
 template <typename VT>
@@ -243,14 +263,14 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 const size_t maxIt) {
 
   dim3 blockSize(blockSize_x, blockSize_y);
-  int smcount = 0;
-  cudaDeviceGetAttribute(&smcount, cudaDevAttrMultiProcessorCount, 0);
+  int smcount = gcxx::Device::getAttribute(
+    gcxx::flags::deviceAttribute::MultiProcessorCount);
   dim3 numBlocks(smcount, 10);
 
   gcxx::launch::Kernel(numBlocks, blockSize, residual_initp<VT>, res, p, rhs, u,
                        nx, ny);
 
-  auto nextResSq_raii = gcxx::memory::make_device_managed_unique_ptr<VT>(1);
+  auto nextResSq_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
 
   auto mempoolhand = gcxx::MemPoolView::GetDefaultMempool(gcxx::Device::get());
   mempoolhand.SetReleaseThreshold(std::numeric_limits<uint64_t>::max());
@@ -267,9 +287,15 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   VT *alphaden = alphaden_raii.get();
 
   // Create multiple streams for parallelization
-  gcxx::Stream str1(gcxx::flags::streamType::SyncWithNull);
-  gcxx::Stream str2(gcxx::flags::streamType::SyncWithNull);
-  gcxx::Stream str3(gcxx::flags::streamType::SyncWithNull);
+  // Need to make them before the capture since streamdestroy is an synchronizing operation
+  gcxx::Stream str1l(gcxx::flags::streamType::SyncWithNull,
+                     gcxx::flags::streamPriority::VeryLow);
+  gcxx::Stream str1h(gcxx::flags::streamType::SyncWithNull,
+                     gcxx::flags::streamPriority::Critical);
+  gcxx::Stream str2(gcxx::flags::streamType::SyncWithNull,
+                    gcxx::flags::streamPriority::VeryLow);
+  gcxx::Stream str3(gcxx::flags::streamType::SyncWithNull,
+                    gcxx::flags::streamPriority::VeryLow);
 
   VT *curResSq = curResSq_raii.get();
   VT *nextResSq = nextResSq_raii.get();
@@ -281,7 +307,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   size_t *iter = iter_raii.get();
 
   // compute residual norm
-  resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1);
+  resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1l);
 
   // bool isgraphbuilt = false;
   gcxx::Graph graph;
@@ -296,21 +322,28 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   // if (!isgraphbuilt) {
   //   gcxx::Graph
   //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
-  str1.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
+  // Begin capture on all streams that participate in inter-stream
+  // synchronization so that cross-stream dependencies are captured
+  // correctly and do not create "uncaptured work in another stream"
+  str1l.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
+
+
   core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
-          res, nextResSq, beta, str1, str2, str3);
-  gcxx::launch::Kernel(str1, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
+          res, nextResSq, beta, str1l, str1h, str2, str3);
+  gcxx::launch::Kernel(str1l, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
                        maxIt);
-  str1.EndCaptureToGraph(whilegraph);
+
+  // End capture for all streams in the same graph
+  str1l.EndCaptureToGraph(whilegraph);
   gcxx::GraphExec exec = graph.Instantiate();
   // isgraphbuilt = true;
   // }
 
-  exec.Launch(str1);
-  
+  exec.Launch(str1l);
+
   graph.SaveDotfile("./test_verbose.dot", gcxx::flags::graphDebugDot::Verbose);
   // graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
-  str1.Synchronize();
+  str1l.Synchronize();
 
   // check exit criterion
   // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);

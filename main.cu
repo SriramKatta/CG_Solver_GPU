@@ -1,8 +1,5 @@
 // V2 all gpu kernls only data moved once in each diection
 #include "cg-util.h"
-
-#include "cuda-util.h"
-
 #include "kernel.cuh"
 
 #include <fmt/format.h>
@@ -10,12 +7,16 @@
 
 #include <gcxx/api.hpp>
 
+
 template <typename VT>
 inline int realMain(int argc, char *argv[]) {
   auto [tpeName, nx, ny, nItWarmUp, nIt] = parseCLA_2d(argc, argv);
 
-  auto u_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(nx * ny);
-  auto rhs_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(nx * ny);
+
+  auto total_elems = nx * ny;
+
+  auto u_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(total_elems);
+  auto rhs_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(total_elems);
 
   VT *u_host = u_host_raii.get();
   VT *rhs_host = rhs_host_raii.get();
@@ -23,22 +24,22 @@ inline int realMain(int argc, char *argv[]) {
   // init
   initConjugateGradient(u_host, rhs_host, nx, ny);
 
-  auto u_raii = gcxx::memory::make_device_unique_ptr<VT>(nx * ny);
-  auto rhs_raii = gcxx::memory::make_device_unique_ptr<VT>(nx * ny);
+  auto u_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
+  auto rhs_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
 
   VT *u = u_raii.get();
   VT *rhs = rhs_raii.get();
 
-  gcxx::memory::Copy(u, u_host, nx * ny);
-  gcxx::memory::Copy(rhs, rhs_host, nx * ny);
+  gcxx::memory::Copy(u, u_host, total_elems);
+  gcxx::memory::Copy(rhs, rhs_host, total_elems);
 
 
-  auto res_raii = gcxx::memory::make_device_unique_ptr<VT>(nx * ny);
-  auto p_raii = gcxx::memory::make_device_unique_ptr<VT>(nx * ny);
-  auto ap_raii = gcxx::memory::make_device_unique_ptr<VT>(nx * ny);
-  gcxx::memory::Memset(res_raii, 0, nx * ny);
-  gcxx::memory::Memset(p_raii, 0, nx * ny);
-  gcxx::memory::Memset(ap_raii, 0, nx * ny);
+  auto res_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
+  auto p_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
+  auto ap_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
+  gcxx::memory::Memset(res_raii, 0, total_elems);
+  gcxx::memory::Memset(p_raii, 0, total_elems);
+  gcxx::memory::Memset(ap_raii, 0, total_elems);
   VT *res = res_raii.get();
   VT *p = p_raii.get();
   VT *ap = ap_raii.get();
@@ -56,8 +57,8 @@ inline int realMain(int argc, char *argv[]) {
 
   printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
 
-  gcxx::memory::Copy(u_host, u, nx*ny);
-  gcxx::memory::Copy(rhs_host, rhs, nx*ny);
+  gcxx::memory::Copy(u_host, u, total_elems);
+  gcxx::memory::Copy(rhs_host, rhs, total_elems);
 
   // check solution
   checkSolutionConjugateGradient(u_host, rhs_host, nx, ny);
