@@ -2,6 +2,14 @@
 
 #include <mpi.h>
 
+#ifndef SKIP_CUDA_AWARENESS_CHECK
+#include <mpi-ext.h>
+#if !defined(MPIX_CUDA_AWARE_SUPPORT) || !MPIX_CUDA_AWARE_SUPPORT
+#error "The used MPI Implementation does not have CUDA-aware support or CUDA-aware \
+support can't be determined. Define SKIP_CUDA_AWARENESS_CHECK to skip this check."
+#endif
+#endif
+
 #define MPI_CALL(call)                                                    \
   {                                                                       \
     int mpi_status = call;                                                \

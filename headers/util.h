@@ -50,5 +50,5 @@ inline int rows_start_of_rank(int rank, int size, int N)
 {
   int basecount = N / size;
   int remainder = N % size;
-  return (basecount * rank) + MIN(rank, remainder);
+  return (basecount * rank) + std::min(rank, remainder);
 }
