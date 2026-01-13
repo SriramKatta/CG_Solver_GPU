@@ -38,3 +38,17 @@ FCT_DECORATOR size_t ceilingDivide(size_t a, size_t b) {
 FCT_DECORATOR size_t ceilToMultipleOf(size_t a, size_t b) {
   return ceilingDivide(a, b) * b;
 }
+
+inline int rows_in_rank(int rank, int size, int N)
+{
+  int basecount = N / size;
+  int remainder = N % size;
+  return basecount + ((remainder > rank) ? 1 : 0);
+}
+
+inline int rows_start_of_rank(int rank, int size, int N)
+{
+  int basecount = N / size;
+  int remainder = N % size;
+  return (basecount * rank) + MIN(rank, remainder);
+}
