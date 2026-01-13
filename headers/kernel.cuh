@@ -33,8 +33,7 @@ __global__ void applystencil(const VT *const __restrict__ p,
 template <typename VT>
 void launch_apply_stencil(gcxx::StreamView str1l, gcxx::StreamView str1h,
                           dim3 numBlocks, dim3 blockSize, VT *__restrict__ &p,
-                          VT *__restrict__ &ap, size_t nx, size_t ny,
-                          ncclcommview ncomm) {
+                          VT *__restrict__ &ap, size_t nx, size_t ny) {
   // needed since all streams are indepenedent  and may result in unconnected graph nodes
   str1h.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
 
@@ -164,24 +163,28 @@ __global__ void gpu_devide(const VT *const num, const VT *const den, VT *res) {
 }
 
 template <typename VT>
-void resnormsqcalc(const VT *const __restrict__ res, size_t nx, size_t ny,
-                   dim3 numblocks, dim3 blocksize, VT *ressqnorm,
-                   gcxx::StreamView sv) {
+void launch_resnormsqcalc(const VT *const __restrict__ res, size_t nx,
+                          size_t ny, dim3 numblocks, dim3 blocksize,
+                          VT *ressqnorm, gcxx::StreamView sv,
+                          ncclcommview ncomm) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   gcxx::memory::Memset(ressqnorm, 0, 1, sv);
   gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>,
                        res, res, ressqnorm, nx, ny);
+  ncomm.allreduce(ressqnorm, ressqnorm, 1, ncclSum, sv.getRawStream());
 }
 
 template <typename VT>
-void alphacalc(const VT *const __restrict__ p, const VT *const __restrict__ ap,
-               size_t nx, size_t ny, dim3 numblocks, dim3 blocksize,
-               VT *alphanum, VT *alphaden, VT *alpha, gcxx::StreamView sv, ncclcommview ncomm) {
+void launch_alphacalc(const VT *const __restrict__ p,
+                      const VT *const __restrict__ ap, size_t nx, size_t ny,
+                      dim3 numblocks, dim3 blocksize, VT *alphanum,
+                      VT *alphaden, VT *alpha, gcxx::StreamView sv,
+                      ncclcommview ncomm) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
   gcxx::memory::Memset(alphaden, 0, 1, sv);
   gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>, p,
                        ap, alphaden, nx, ny);
-  ncomm.
+  ncomm.allreduce(alphaden, alphaden, 1, ncclSum, sv);
   gcxx::launch::Kernel(sv, 1, 1, 0, gpu_devide<VT>, alphanum, alphaden, alpha);
 }
 
@@ -191,7 +194,7 @@ __global__ void cond_kernel(gcxx::deviceGraphConditionalHandle_t hand,
   if (threadIdx.x != 0)
     return;
   ++(*iter);
-#if !defined(DEBUG)
+#if defined(DEBUG)
   if ((*iter) % 100 == 0) {
     printf("  %ld : %f\n", *iter, sqrt(*res_sq));
   }
@@ -214,14 +217,13 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
   nvtx3::scoped_range range{"main_loop"};
   // compute A * p (stream 1)
   nvtxRangePushA("Ap");
-  launch_apply_stencil(str1l, str1h, numBlocks, blockSize, p, ap, nx, ny,
-                       ncomm);
+  launch_apply_stencil(str1l, str1h, numBlocks, blockSize, p, ap, nx, ny);
   nvtxRangePop();
 
   // alpha calculation depends on Ap (stream 1)
   nvtxRangePushA("alpha");
-  alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alphaden, alpha,
-            str1l);
+  launch_alphacalc(p, ap, nx, ny, numBlocks, blockSize, curResSq, alphaden,
+                   alpha, str1l, ncomm);
   nvtxRangePop();
 
   // update solution (stream 2 - depends on alpha)
@@ -240,7 +242,8 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
 
   // compute residual norm (stream 3 - depends on residual update)
   nvtxRangePushA("resNorm");
-  resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq, str3);
+  launch_resnormsqcalc(res, nx, ny, numBlocks, blockSize, nextResSq, str3,
+                       ncomm);
   nvtxRangePop();
 
   // compute beta (stream 1 - depends on residual norm)
@@ -313,7 +316,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   size_t *iter = iter_raii.get();
 
   // compute residual norm
-  resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1l);
+  launch_resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1l,
+                       ncomm);
 
   // bool isgraphbuilt = false;
   gcxx::Graph graph;
@@ -330,40 +334,42 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   //   gcxx::Graph
   //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
 
-    str1l.BeginCaptureToGraph(whilegraph,
-                              gcxx::flags::streamCaptureMode::Global);
+  str1l.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
 
 
-    core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
-            res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
-    gcxx::launch::Kernel(str1l, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
-                         maxIt);
+  core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
+          res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
+  gcxx::launch::Kernel(str1l, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
+                       maxIt);
 
-    // End capture for all streams in the same graph
-    str1l.EndCaptureToGraph(whilegraph);
- exec = graph.Instantiate();
-    // isgraphbuilt = true;
-    // }
+  // End capture for all streams in the same graph
+  str1l.EndCaptureToGraph(whilegraph);
+  exec = graph.Instantiate();
+  // isgraphbuilt = true;
+  // }
 
-    exec.Launch(str1l);
+  exec.Launch(str1l);
 
-    // graph.SaveDotfile("./test_verbose.dot",
-    //                   gcxx::flags::graphDebugDot::Verbose);
-    // graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
-    str1l.Synchronize();
+  // graph.SaveDotfile("./test_verbose.dot",
+  //                   gcxx::flags::graphDebugDot::Verbose |
+  //                     gcxx::flags::graphDebugDot::ExtSemasSignalNodeParams |
+  //                     gcxx::flags::graphDebugDot::ExtSemasWaitNodeParams |
+  //                     gcxx::flags::graphDebugDot::ConditionalNodeParams);
+  // graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
+  str1l.Synchronize();
 
-    // // check exit criterion
-    // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
-    // str1.Synchronize();  // Needed
-    // if (sqrt(*nextResSq) <= 1e-12) {
-    //   return it;
-    // }
-    // if (0 == it % 100)
-    //   fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
-    // }
+  // // check exit criterion
+  // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
+  // str1.Synchronize();  // Needed
+  // if (sqrt(*nextResSq) <= 1e-12) {
+  //   return it;
+  // }
+  // if (0 == it % 100)
+  //   fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
+  // }
 
-    size_t ithost{};
-    gcxx::memory::Copy(&ithost, iter, 1);
+  size_t ithost{};
+  gcxx::memory::Copy(&ithost, iter, 1);
 
-    return ithost;
-  }
+  return ithost;
+}

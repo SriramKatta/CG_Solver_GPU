@@ -93,6 +93,24 @@ struct reghandle {
   explicit operator bool() const { return handle_ != nullptr; }
 };
 
+template <typename>
+constexpr bool is_always_false_value = false;
+
+template <typename VT>
+struct nccldt {
+  static_assert(is_always_false_value<VT>, "Unsupported type for NCCL");
+};
+
+template <>
+struct nccldt<float> {
+  static constexpr ncclDataType_t value = ncclFloat32;
+};
+
+template <>
+struct nccldt<double> {
+  static constexpr ncclDataType_t value = ncclFloat64;
+};
+
 
 class ncclcommview {
  protected:
@@ -122,6 +140,14 @@ class ncclcommview {
   template <typename VT>
   [[nodiscard]] reghandle register_buffer(VT *buff, size_t numelems) {
     return reghandle(nccl_comm_, buff, numelems * sizeof(VT));
+  }
+
+  template <typename VT>
+  void allreduce(const VT *sendbuff, VT *recvbuff, size_t count, ncclRedOp_t op,
+                 gcxx::StreamView stream) {
+    constexpr auto dt = nccldt<VT>::value;
+    NCCL_CALL(ncclAllReduce(sendbuff, recvbuff, count, dt, op, nccl_comm_,
+                            stream.getRawStream()));
   }
 };
 
