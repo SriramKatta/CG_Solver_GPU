@@ -269,7 +269,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 VT *__restrict__ u, VT *__restrict__ res,
                                 VT *__restrict__ p, VT *__restrict__ ap,
                                 const size_t nx, const size_t ny,
-                                const size_t maxIt, ncclcommview ncomm) {
+                                const size_t maxIt, ncclcommview ncomm,bool ismasterNode) {
 
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = gcxx::Device::getAttribute(
@@ -279,14 +279,14 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   gcxx::launch::Kernel(numBlocks, blockSize, residual_initp<VT>, res, p, rhs, u,
                        nx, ny);
 
-  auto nextResSq_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
+  auto nextResSq_raii = nccl::make_nccl_unique<VT>(1);
 
   // auto mempoolhand = gcxx::MemPoolView::GetDefaultMempool(gcxx::Device::get());
   // mempoolhand.SetReleaseThreshold(std::numeric_limits<uint64_t>::max());
 
-  auto curResSq_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
-  auto alpha_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
-  auto beta_raii = gcxx::memory::make_device_unique_ptr<VT>(1);
+  auto curResSq_raii = nccl::make_nccl_unique<VT>(1);
+  auto alpha_raii = nccl::make_nccl_unique<VT>(1);
+  auto beta_raii = nccl::make_nccl_unique<VT>(1);
   gcxx::memory::Memset(curResSq_raii, 0, 1);
   gcxx::memory::Memset(nextResSq_raii, 0, 1);
   gcxx::memory::Memset(alpha_raii, 0, 1);
@@ -320,35 +320,44 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                        ncomm);
 
   // bool isgraphbuilt = false;
-  gcxx::Graph graph;
+  // gcxx::Graph graph;
 
-  auto hand = graph.CreateConditionalHandle(
-    1, gcxx::flags::graphConditionalHandle::Default);
+  // auto hand = graph.CreateConditionalHandle(
+  //   1, gcxx::flags::graphConditionalHandle::Default);
 
-  auto [condnode, whilegraph] = graph.AddWhileNode(hand);
+  // auto [condnode, whilegraph] = graph.AddWhileNode(hand);
 
   // main loop
-  gcxx::GraphExec exec;
+  // gcxx::GraphExec exec;
 
-  // if (!isgraphbuilt) {
-  //   gcxx::Graph
-  //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
+  // // if (!isgraphbuilt) {
+  // //   gcxx::Graph
+  // //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
 
-  str1l.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
+  // str1l.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
 
+  VT nextResSq_host{};
+  ssize_t ithost{1};
+  do {
+    core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
+            res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
+    gcxx::memory::Copy(&nextResSq_host, nextResSq, 1);
+    if (ithost % 100 == 0 && ismasterNode)
+     fmt::print("maxiter {} | iter {}| res {}\n", maxIt, ithost,
+                 sqrt(nextResSq_host));
 
-  core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
-          res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
-  gcxx::launch::Kernel(str1l, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
-                       maxIt);
+  } while (++ithost < maxIt &&
+           sqrt(nextResSq_host) > 1e-12);  // TODO :Switch to cudagraphs style
+  // gcxx::launch::Kernel(str1l, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
+  //                      maxIt);
 
   // End capture for all streams in the same graph
-  str1l.EndCaptureToGraph(whilegraph);
-  exec = graph.Instantiate();
-  // isgraphbuilt = true;
-  // }
+  // str1l.EndCaptureToGraph(whilegraph);
+  // exec = graph.Instantiate();
+  // // isgraphbuilt = true;
+  // // }
 
-  exec.Launch(str1l);
+  // exec.Launch(str1l);
 
   // graph.SaveDotfile("./test_verbose.dot",
   //                   gcxx::flags::graphDebugDot::Verbose |
@@ -368,8 +377,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   //   fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
   // }
 
-  size_t ithost{};
-  gcxx::memory::Copy(&ithost, iter, 1);
+
+  // gcxx::memory::Copy(&ithost, iter, 1);
 
   return ithost;
 }

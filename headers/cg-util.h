@@ -6,6 +6,7 @@
 #include <fmt/format.h>
 
 #include "util.h"
+#include "mpi_comm.hpp"
 
 
 template <typename tpe>
@@ -58,8 +59,14 @@ void checkSolutionConjugateGradient(const tpe *const __restrict__ u, const tpe *
         }
     }
 
+     auto world_comm = mpicomm::world();
+
+     world_comm.reduce_sum(res, 0);
+
+    
     res = sqrt(res);
 
+    if(world_comm.rank() == 0)
     fmt::print("  Final residual is {}", res);
 }
 
