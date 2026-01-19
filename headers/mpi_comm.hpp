@@ -132,7 +132,7 @@ class mpicommview {
   }
 
   template <typename VT>
-  MPI_Request isend(const VT *sendbuff, size_t count, int send_to_rank,
+  request isend(const VT *sendbuff, size_t count, int send_to_rank,
                     int sender_tag) {
     auto type = mpitype<VT>::value();
     MPI_Request req;
@@ -141,7 +141,7 @@ class mpicommview {
     return {req};
   }
   template <typename VT>
-  MPI_Request irecv(VT *recvbuff, size_t count, int recv_from_rank,
+  request irecv(VT *recvbuff, size_t count, int recv_from_rank,
                     int recver_tag) {
     auto type = mpitype<VT>::value();
     MPI_Request req;

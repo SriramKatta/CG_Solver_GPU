@@ -117,7 +117,7 @@ void initConjugateGradientDistributed(tpe *__restrict__ u,
   auto below_rank = get_rank_below(rank, size);
   auto above_rank = get_rank_above(rank, size);
 
-  std::vector<MPI_Request> reqs;
+  std::vector<request> reqs;
 
   if (is_top) {
     reqs.push_back(comm.isend(u_local, nx, below_rank, 0));
@@ -138,7 +138,7 @@ void initConjugateGradientDistributed(tpe *__restrict__ u,
   }
 
   // Wait for all asynchronous communication to complete
-  MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+  // MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
 }
 
 template <typename tpe>
