@@ -203,7 +203,7 @@ void checkSolutionConjugateGradientDistributed(tpe *__restrict__ u,
     fmt::print("  Final residual is {}", res);
 }
 
-inline std::tuple<std::string, size_t, size_t, size_t, size_t> parseCLA_2d(
+inline std::tuple<std::string, size_t, size_t, size_t, size_t, int> parseCLA_2d(
   int argc, char **argv) {
   argparse::ArgumentParser program("cg_solver");
 
@@ -229,7 +229,12 @@ inline std::tuple<std::string, size_t, size_t, size_t, size_t> parseCLA_2d(
 
   program.add_argument("-s", "--ngSteps")
     .help("number of iterations")
-    .default_value(size_t{100})
+    .default_value(size_t{1})
+    .scan<'u', size_t>();
+
+  program.add_argument("-v", "--verbose")
+    .help("increase verbosity level (-v, -vv, -vvv)")
+    .default_value(0)
     .scan<'u', size_t>();
 
   program.add_argument("-h", "--help")
@@ -253,11 +258,13 @@ inline std::tuple<std::string, size_t, size_t, size_t, size_t> parseCLA_2d(
     std::exit(0);
   }
 
-  std::string tpeName = program.get<std::string>("tpeName");
-  size_t nx = program.get<size_t>("--nx");
-  size_t ny = program.get<size_t>("--ny");
-  size_t nIt = program.get<size_t>("--nIt");
-  size_t ngraphsteps = program.get<size_t>("--ngSteps");
 
-  return {tpeName, nx, ny, nIt, ngraphsteps};
+  auto tpeName = program.get<std::string>("tpeName");
+  auto nx = program.get<size_t>("--nx");
+  auto ny = program.get<size_t>("--ny");
+  auto nIt = program.get<size_t>("--nIt");
+  auto ngraphsteps = program.get<size_t>("--ngSteps");
+  auto verbose = program.get<size_t>("--verbose");
+
+  return {tpeName, nx, ny, nIt, ngraphsteps, verbose};
 }

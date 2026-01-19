@@ -13,7 +13,7 @@
 
 template <typename VT>
 inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
-                    size_t nIt, size_t ngraphsteps) {
+                    size_t nIt, size_t ngraphsteps, int verbose) {
 
   auto world_comm = mpicomm::world();
   int world_rank = world_comm.rank();
@@ -37,12 +37,11 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
     localsize = localcomm.size();
   }
 
-
-  // fmt::print("wrank {}, wsize {}, gpu count {}\n", world_rank, world_size,
-  //            devcount);
-  // fmt::print("local rank {} | local size {}\n", localrank, localsize);
-
-  // return 0;
+  if (verbose >= 2) {
+    fmt::print("wrank {}, wsize {}, gpu count {}\n", world_rank, world_size,
+               devcount);
+    fmt::print("local rank {} | local size {}\n", localrank, localsize);
+  }
 
   ncclUniqueId ncclid{};
   if (world_rank == 0) {
@@ -106,7 +105,7 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
   auto start = std::chrono::steady_clock::now();
 
   nIt = conjugateGradient(rhs, u, res, p, ap, nx, chunk_size_with_halo, nIt,
-                          ngraphsteps, ncomm, localrank, localsize);
+                          ngraphsteps, ncomm, localrank, localsize, verbose);
 
   auto end = std::chrono::steady_clock::now();
 
@@ -133,11 +132,14 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
 int main(int argc, char *argv[]) try {
   mpienv env(argc, argv);
 
-  auto [tpeName, nx, ny_global, nIt, ngraphsteps] = parseCLA_2d(argc, argv);
+  auto [tpeName, nx, ny_global, nIt, ngraphsteps, verbose] =
+    parseCLA_2d(argc, argv);
+
+
   if ("float" == tpeName)
-    return realMain<float>(tpeName, nx, ny_global, nIt, ngraphsteps);
+    return realMain<float>(tpeName, nx, ny_global, nIt, ngraphsteps, verbose);
   if ("double" == tpeName)
-    return realMain<double>(tpeName, nx, ny_global, nIt, ngraphsteps);
+    return realMain<double>(tpeName, nx, ny_global, nIt, ngraphsteps, verbose);
 
 } catch (...) {
   return EXIT_FAILURE;
