@@ -13,7 +13,7 @@
 
 template <typename VT>
 inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
-                    size_t nIt) {
+                    size_t nIt, size_t ngraphsteps) {
 
   auto world_comm = mpicomm::world();
   int world_rank = world_comm.rank();
@@ -106,9 +106,14 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
   auto start = std::chrono::steady_clock::now();
 
   nIt = conjugateGradient(rhs, u, res, p, ap, nx, chunk_size_with_halo, nIt,
-                          ncomm, localrank, localsize);
+                          ngraphsteps, ncomm, localrank, localsize);
 
   auto end = std::chrono::steady_clock::now();
+
+  auto dur = std::chrono::duration<double>((end - start)).count();
+
+  world_comm.reduce_max(dur, 0);
+
 
   gcxx::memory::Copy(u_host, u, total_elems);
   gcxx::memory::Copy(rhs_host, rhs, total_elems);
@@ -116,8 +121,7 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
   // check solution
   if (world_rank == 0) {
     fmt::print("  CG steps:      {}\n", nIt);
-    printStats<VT>(end - start, nIt, nx * ny_global, tpeName, 8 * sizeof(VT),
-                   15);
+    printStats<VT>(dur, nIt, nx * ny_global, tpeName, 8 * sizeof(VT), 15);
   }
 
   checkSolutionConjugateGradientDistributed(u_host, rhs_host, nx,
@@ -129,11 +133,11 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
 int main(int argc, char *argv[]) try {
   mpienv env(argc, argv);
 
-  auto [tpeName, nx, ny_global, nIt] = parseCLA_2d(argc, argv);
+  auto [tpeName, nx, ny_global, nIt, ngraphsteps] = parseCLA_2d(argc, argv);
   if ("float" == tpeName)
-    return realMain<float>(tpeName, nx, ny_global, nIt);
+    return realMain<float>(tpeName, nx, ny_global, nIt, ngraphsteps);
   if ("double" == tpeName)
-    return realMain<double>(tpeName, nx, ny_global, nIt);
+    return realMain<double>(tpeName, nx, ny_global, nIt, ngraphsteps);
 
 } catch (...) {
   return EXIT_FAILURE;

@@ -203,7 +203,7 @@ void checkSolutionConjugateGradientDistributed(tpe *__restrict__ u,
     fmt::print("  Final residual is {}", res);
 }
 
-inline std::tuple<std::string, size_t, size_t, size_t> parseCLA_2d(
+inline std::tuple<std::string, size_t, size_t, size_t, size_t> parseCLA_2d(
   int argc, char **argv) {
   argparse::ArgumentParser program("cg_solver");
 
@@ -224,7 +224,12 @@ inline std::tuple<std::string, size_t, size_t, size_t> parseCLA_2d(
 
   program.add_argument("-n", "--nIt")
     .help("number of iterations")
-    .default_value(size_t{200})
+    .default_value(size_t{20000})
+    .scan<'u', size_t>();
+
+  program.add_argument("-s", "--ngSteps")
+    .help("number of iterations")
+    .default_value(size_t{100})
     .scan<'u', size_t>();
 
   program.add_argument("-h", "--help")
@@ -238,11 +243,13 @@ inline std::tuple<std::string, size_t, size_t, size_t> parseCLA_2d(
   } catch (const std::exception &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
+    MPI_Finalize();
     std::exit(1);
   }
 
   if (program.get<bool>("--help")) {
     std::cout << program << std::endl;
+    MPI_Finalize();
     std::exit(0);
   }
 
@@ -250,6 +257,7 @@ inline std::tuple<std::string, size_t, size_t, size_t> parseCLA_2d(
   size_t nx = program.get<size_t>("--nx");
   size_t ny = program.get<size_t>("--ny");
   size_t nIt = program.get<size_t>("--nIt");
+  size_t ngraphsteps = program.get<size_t>("--ngSteps");
 
-  return {tpeName, nx, ny, nIt};
+  return {tpeName, nx, ny, nIt, ngraphsteps};
 }

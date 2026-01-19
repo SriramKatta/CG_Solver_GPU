@@ -88,6 +88,17 @@ class mpicommview {
 
   mpicommview() = default;
 
+  template <typename VT>
+  void reduce_internal(VT &val, int root, MPI_Op OP) {
+    if (rank() == root) {
+      MPI_CALL(MPI_Reduce(MPI_IN_PLACE, &val, 1, mpitype<VT>::value(), OP, root,
+                          comm_));
+    } else {
+      MPI_CALL(
+        MPI_Reduce(&val, nullptr, 1, mpitype<VT>::value(), OP, root, comm_));
+    }
+  }
+
 
  public:
   explicit mpicommview(MPI_Comm comm) : comm_(comm) {}
@@ -119,13 +130,12 @@ class mpicommview {
 
   template <typename VT>
   void reduce_sum(VT &val, int root) {
-    if (rank() == root) {
-      MPI_CALL(MPI_Reduce(MPI_IN_PLACE, &val, 1, mpitype<VT>::value(), MPI_SUM,
-                          root, comm_));
-    } else {
-      MPI_CALL(MPI_Reduce(&val, nullptr, 1, mpitype<VT>::value(), MPI_SUM, root,
-                          comm_));
-    }
+    reduce_internal(val, root, MPI_SUM);
+  }
+
+  template <typename VT>
+  void reduce_max(VT &val, int root) {
+    reduce_internal(val, root, MPI_MAX);
   }
 
   template <typename VT>

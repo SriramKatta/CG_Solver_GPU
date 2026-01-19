@@ -15,20 +15,20 @@
 
 
 template <typename tpe>
-void printStats(const std::chrono::duration<double> elapsedSeconds, size_t nIt,
+void printStats(const double elapsedSeconds, size_t nIt,
                 size_t nCells, std::string_view tpeName, size_t numBytesPerCell,
                 size_t numFlopsPerCell) {
   fmt::print("  #cells / #it:  {} / {}\n", nCells, nIt);
   fmt::print("  type:          {}\n", tpeName);
-  fmt::print("  elapsed time:  {:.3f} ms\n", 1e3 * elapsedSeconds.count());
+  fmt::print("  elapsed time:  {:.3f} ms\n", 1e3 * elapsedSeconds);
   fmt::print("  per iteration: {:.3f} ms\n",
-             1e3 * elapsedSeconds.count() / nIt);
+             1e3 * elapsedSeconds / nIt);
   fmt::print("  MLUP/s:        {:.3f}\n",
-             1e-6 * nCells * nIt / elapsedSeconds.count());
+             1e-6 * nCells * nIt / elapsedSeconds);
   fmt::print("  bandwidth:     {:.3f} GB/s\n",
-             1e-9 * numBytesPerCell * nCells * nIt / elapsedSeconds.count());
+             1e-9 * numBytesPerCell * nCells * nIt / elapsedSeconds);
   fmt::print("  compute:       {:.3f} GFLOP/s\n",
-             1e-9 * numFlopsPerCell * nCells * nIt / elapsedSeconds.count());
+             1e-9 * numFlopsPerCell * nCells * nIt / elapsedSeconds);
 }
 
 FCT_DECORATOR size_t ceilingDivide(size_t a, size_t b) {

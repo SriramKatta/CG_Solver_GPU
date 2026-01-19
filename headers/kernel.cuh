@@ -280,8 +280,9 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 VT *__restrict__ u, VT *__restrict__ res,
                                 VT *__restrict__ p, VT *__restrict__ ap,
                                 const size_t nx, const size_t ny,
-                                const size_t maxIt, ncclcommview ncomm,
-                                int local_rank, int local_size) {
+                                const size_t maxIt, const size_t ngraphsteps,
+                                ncclcommview ncomm, int local_rank,
+                                int local_size) {
 
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = gcxx::Device::getAttribute(
@@ -292,9 +293,6 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                        nx, ny);
 
   auto nextResSq_raii = nccl::make_nccl_unique<VT>(1);
-
-  // auto mempoolhand = gcxx::MemPoolView::GetDefaultMempool(gcxx::Device::get());
-  // mempoolhand.SetReleaseThreshold(std::numeric_limits<uint64_t>::max());
 
   auto curResSq_raii = nccl::make_nccl_unique<VT>(1);
   auto alpha_raii = nccl::make_nccl_unique<VT>(1);
@@ -323,41 +321,23 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   VT *alpha = alpha_raii.get();
   VT *beta = beta_raii.get();
 
-  // auto iter_raii = gcxx::memory::make_device_unique_ptr<size_t>(1);
-  // gcxx::memory::Memset(iter_raii, 0, 1);
-  // size_t *iter = iter_raii.get();
 
   // compute residual norm
   launch_resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1l,
                        ncomm);
 
-  // bool isgraphbuilt = false;
-  // gcxx::Graph graph;
-
-  // auto hand = graph.CreateConditionalHandle(
-  //   1, gcxx::flags::graphConditionalHandle::Default);
-
-  // auto [condnode, whilegraph] = graph.AddWhileNode(hand);
-
-  // main loop
-  // gcxx::GraphExec exec;
-
-  // // if (!isgraphbuilt) {
-  // //   gcxx::Graph
-  // //     graph;  // keeping it since i wanna use condition node and directly loadgraph to it
-
-  // str1l.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
 
   bool graph_is_built = false;
   VT nextResSq_host{};
   gcxx::GraphExec graphexec;
-  ssize_t ithost{1};
+  ssize_t ithost{0};
   do {
     if (!graph_is_built) {
       str1l.BeginCapture(gcxx::flags::streamCaptureMode::Global);
-
-      core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
-              res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
+      for (int i = 0; i < ngraphsteps; ++i) {
+        core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha,
+                u, res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
+      }
 
       gcxx::memory::Copy(&nextResSq_host, nextResSq, 1, str1l);
       auto graph = str1l.EndCapture();
@@ -365,44 +345,13 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
       graph_is_built = true;
     }
     graphexec.Launch(str1l);
+    ++ithost;
     str1l.Synchronize();
-    if (ithost % 100 == 0 && local_rank == 0)
-      fmt::print("maxiter {} | iter {}| res {}\n", maxIt, ithost,
-                 sqrt(nextResSq_host));
+    // if (local_rank == 0)
+    //   fmt::print("maxiter {} | iter {}| res {}\n", maxIt, ngraphsteps * ithost,
+    //              sqrt(nextResSq_host));
 
-  } while (++ithost < maxIt &&
-           sqrt(nextResSq_host) > 1e-12);  // TODO :Switch to cudagraphs style
-  // gcxx::launch::Kernel(str1l, 1, 1, 0, cond_kernel<VT>, hand, nextResSq, iter,
-  //                      maxIt);
+  } while (ngraphsteps * ithost < maxIt && sqrt(nextResSq_host) > 1e-12);
 
-  // End capture for all streams in the same graph
-  // str1l.EndCaptureToGraph(whilegraph);
-  // exec = graph.Instantiate();
-  // // isgraphbuilt = true;
-  // // }
-
-  // exec.Launch(str1l);
-
-  // graph.SaveDotfile("./test_verbose.dot",
-  //                   gcxx::flags::graphDebugDot::Verbose |
-  //                     gcxx::flags::graphDebugDot::ExtSemasSignalNodeParams |
-  //                     gcxx::flags::graphDebugDot::ExtSemasWaitNodeParams |
-  //                     gcxx::flags::graphDebugDot::ConditionalNodeParams);
-  // graph.SaveDotfile("./test_normal.dot", gcxx::flags::graphDebugDot::ConditionalNodeParams);
-  str1l.Synchronize();
-
-  // // check exit criterion
-  // cudaMemPrefetchAsync(nextResSq, sizeof(VT), cudaCpuDeviceId, str1);
-  // str1.Synchronize();  // Needed
-  // if (sqrt(*nextResSq) <= 1e-12) {
-  //   return it;
-  // }
-  // if (0 == it % 100)
-  //   fmt::print("     {} : {}\n", it, sqrt(*nextResSq));
-  // }
-
-
-  // gcxx::memory::Copy(&ithost, iter, 1);
-
-  return ithost;
+  return ithost * ngraphsteps;
 }
