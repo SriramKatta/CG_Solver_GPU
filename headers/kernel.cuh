@@ -11,6 +11,17 @@
 #include <nccl_comm.hpp>
 
 
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+// TODO : modify all kernels to respect boundaries and work accordingly
+
+
 constexpr auto blockSize_x = 32, blockSize_y = 16;
 
 template <typename VT>
@@ -269,7 +280,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
                                 VT *__restrict__ u, VT *__restrict__ res,
                                 VT *__restrict__ p, VT *__restrict__ ap,
                                 const size_t nx, const size_t ny,
-                                const size_t maxIt, ncclcommview ncomm,bool ismasterNode) {
+                                const size_t maxIt, ncclcommview ncomm,
+                                int local_rank, int local_size) {
 
   dim3 blockSize(blockSize_x, blockSize_y);
   int smcount = gcxx::Device::getAttribute(
@@ -311,9 +323,9 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
   VT *alpha = alpha_raii.get();
   VT *beta = beta_raii.get();
 
-  auto iter_raii = gcxx::memory::make_device_unique_ptr<size_t>(1);
-  gcxx::memory::Memset(iter_raii, 0, 1);
-  size_t *iter = iter_raii.get();
+  // auto iter_raii = gcxx::memory::make_device_unique_ptr<size_t>(1);
+  // gcxx::memory::Memset(iter_raii, 0, 1);
+  // size_t *iter = iter_raii.get();
 
   // compute residual norm
   launch_resnormsqcalc(res, nx, ny, numBlocks, blockSize, curResSq, str1l,
@@ -336,14 +348,26 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
   // str1l.BeginCaptureToGraph(whilegraph, gcxx::flags::streamCaptureMode::Global);
 
+  bool graph_is_built = false;
   VT nextResSq_host{};
+  gcxx::GraphExec graphexec;
   ssize_t ithost{1};
   do {
-    core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
-            res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
-    gcxx::memory::Copy(&nextResSq_host, nextResSq, 1);
-    if (ithost % 100 == 0 && ismasterNode)
-     fmt::print("maxiter {} | iter {}| res {}\n", maxIt, ithost,
+    if (!graph_is_built) {
+      str1l.BeginCapture(gcxx::flags::streamCaptureMode::Global);
+
+      core_CG(numBlocks, blockSize, p, ap, nx, ny, curResSq, alphaden, alpha, u,
+              res, nextResSq, beta, str1l, str1h, str2, str3, ncomm);
+
+      gcxx::memory::Copy(&nextResSq_host, nextResSq, 1, str1l);
+      auto graph = str1l.EndCapture();
+      graphexec = graph.Instantiate();
+      graph_is_built = true;
+    }
+    graphexec.Launch(str1l);
+    str1l.Synchronize();
+    if (ithost % 100 == 0 && local_rank == 0)
+      fmt::print("maxiter {} | iter {}| res {}\n", maxIt, ithost,
                  sqrt(nextResSq_host));
 
   } while (++ithost < maxIt &&

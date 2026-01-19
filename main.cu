@@ -41,6 +41,8 @@ inline int realMain(int argc, char *argv[]) {
   //            devcount);
   // fmt::print("local rank {} | local size {}\n", localrank, localsize);
 
+  // return 0;
+
   ncclUniqueId ncclid{};
   if (world_rank == 0) {
     ncclid = nccl::getuniqueID();
@@ -50,16 +52,16 @@ inline int realMain(int argc, char *argv[]) {
 
   world_comm.barrier();
   auto devref = gcxx::Device::set(localrank);
-  // cudaSetDevice(localrank);
+
 
   ncclcomm ncomm(localrank, localsize, ncclid);
 
-#if 1
-  auto [tpeName, nx, ny, nIt] = parseCLA_2d(argc, argv);
+  auto [tpeName, nx, ny_global, nIt] = parseCLA_2d(argc, argv);
 
-  // auto chunk =
+  auto chunk_size_with_halo =
+    chunk_rows_of_rank(world_rank, world_size, ny_global);
 
-  auto total_elems = nx * ny;
+  auto total_elems = nx * chunk_size_with_halo;
 
   auto u_host_raii = gcxx::memory::make_host_pinned_unique_ptr<VT>(total_elems);
   auto rhs_host_raii =
@@ -69,7 +71,10 @@ inline int realMain(int argc, char *argv[]) {
   VT *rhs_host = rhs_host_raii.get();
 
   // init
-  initConjugateGradient(u_host, rhs_host, nx, ny);
+  // initConjugateGradient(u_host, rhs_host, nx, ny);
+  initConjugateGradientDistributed(
+    u_host, rhs_host, nx, ny_global,
+    world_comm);  // TODO think and change to local comm
 
   auto u_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
   auto rhs_raii = gcxx::memory::make_device_unique_ptr<VT>(total_elems);
@@ -89,6 +94,7 @@ inline int realMain(int argc, char *argv[]) {
   gcxx::memory::Memset(res_raii, 0, total_elems);
   gcxx::memory::Memset(p_raii, 0, total_elems);
   gcxx::memory::Memset(ap_raii, 0, total_elems);
+
   VT *res = res_raii.get();
   VT *p = p_raii.get();
   VT *ap = ap_raii.get();
@@ -100,7 +106,8 @@ inline int realMain(int argc, char *argv[]) {
   // measurement
   auto start = std::chrono::steady_clock::now();
 
-  nIt = conjugateGradient(rhs, u, res, p, ap, nx, ny, nIt, ncomm, world_rank == 0);
+  nIt = conjugateGradient(rhs, u, res, p, ap, nx, chunk_size_with_halo, nIt,
+                          ncomm, localrank, localsize);
 
   auto end = std::chrono::steady_clock::now();
 
@@ -110,11 +117,12 @@ inline int realMain(int argc, char *argv[]) {
   // check solution
   if (world_rank == 0) {
     fmt::print("  CG steps:      {}\n", nIt);
-    printStats<VT>(end - start, nIt, nx * ny, tpeName, 8 * sizeof(VT), 15);
+    printStats<VT>(end - start, nIt, nx * ny_global, tpeName, 8 * sizeof(VT),
+                   15);
   }
 
-  checkSolutionConjugateGradient(u_host, rhs_host, nx, ny);
-#endif
+  checkSolutionConjugateGradientDistributed(u_host, rhs_host, nx, chunk_size_with_halo);
+
   return 0;
 }
 

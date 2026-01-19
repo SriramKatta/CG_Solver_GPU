@@ -9,7 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CUDA_ARCHITECTURES "80;86")
 
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
 
 set(NVTX_MARK_OFF ON)
 
@@ -35,8 +35,8 @@ target_link_libraries(exe-main PRIVATE gcxx::gcxx)
 target_link_libraries(exe-main PRIVATE fmt::fmt)
 target_link_libraries(exe-main PRIVATE MPI::MPI_CXX)
 target_link_libraries(exe-main PRIVATE NCCL::NCCL)
-
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(exe-main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G -lineinfo>)
 endif()
 
+add_subdirectory(tests)
