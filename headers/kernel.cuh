@@ -347,9 +347,10 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
     graphexec.Launch(str1l);
     ++ithost;
     str1l.Synchronize();
-    if (local_rank == 0 && verbose >= 1)
+    if (local_rank == 0 && verbose >= 1) {
       fmt::print("maxiter {} | iter {}| res {}\n", maxIt, ngraphsteps * ithost,
                  sqrt(nextResSq_host));
+    }
 
   } while (ngraphsteps * ithost < maxIt && sqrt(nextResSq_host) > 1e-12);
 
