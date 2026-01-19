@@ -129,7 +129,7 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
   return 0;
 }
 
-int main(int argc, char *argv[]) try {
+int main(int argc, char *argv[]) {
   mpienv env(argc, argv);
 
   auto [tpeName, nx, ny_global, nIt, ngraphsteps, verbose] =
@@ -141,6 +141,4 @@ int main(int argc, char *argv[]) try {
   if ("double" == tpeName)
     return realMain<double>(tpeName, nx, ny_global, nIt, ngraphsteps, verbose);
 
-} catch (...) {
-  return EXIT_FAILURE;
 }

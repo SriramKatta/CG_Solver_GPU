@@ -233,14 +233,9 @@ inline std::tuple<std::string, size_t, size_t, size_t, size_t, int> parseCLA_2d(
     .scan<'u', size_t>();
 
   program.add_argument("-v", "--verbose")
-    .help("increase verbosity level (-v, -vv, -vvv)")
-    .default_value(0)
+    .help("increase verbosity level")
+    .default_value(size_t{0})
     .scan<'u', size_t>();
-
-  program.add_argument("-h", "--help")
-    .help("print this help message")
-    .default_value(false)
-    .implicit_value(true);
 
 
   try {
@@ -252,12 +247,6 @@ inline std::tuple<std::string, size_t, size_t, size_t, size_t, int> parseCLA_2d(
     std::exit(1);
   }
 
-  if (program.get<bool>("--help")) {
-    std::cout << program << std::endl;
-    MPI_Finalize();
-    std::exit(0);
-  }
-
 
   auto tpeName = program.get<std::string>("tpeName");
   auto nx = program.get<size_t>("--nx");
@@ -266,5 +255,17 @@ inline std::tuple<std::string, size_t, size_t, size_t, size_t, int> parseCLA_2d(
   auto ngraphsteps = program.get<size_t>("--ngSteps");
   auto verbose = program.get<size_t>("--verbose");
 
-  return {tpeName, nx, ny, nIt, ngraphsteps, verbose};
+
+  // fmt::print(
+  //   "tpename {}\n"
+  //   "nx {}\n"
+  //   "ny {}\n"
+  //   "nIt {}\n"
+  //   "ngraphsteps {}\n"
+  //   "verbose {}\n",
+  //   tpeName, nx, ny, nIt, ngraphsteps, verbose
+
+  //   );
+
+    return {tpeName, nx, ny, nIt, ngraphsteps, verbose};
 }

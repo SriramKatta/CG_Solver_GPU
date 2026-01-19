@@ -43,7 +43,7 @@ target_link_libraries(${EXE_NAME} PRIVATE argparse::argparse)
 
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(${EXE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G -lineinfo>)
+    target_compile_options(${EXE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-g -G>)
 endif()
 
 add_subdirectory(tests)

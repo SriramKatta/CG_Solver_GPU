@@ -2,6 +2,7 @@
 
 module purge 
 module load nvhpc
+module load cuda
 module load openmpi
 module load cmake 
 
@@ -13,7 +14,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$NCCL_HOME/lib
 export NVSHMEM_HOME=$NV_COMM_LIBS/nvshmem
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$NVSHMEM_HOME/lib
 
-# cmake -S. -Bbuild 
+cmake -S. -Bbuild 
 cmake --build build -- -j
 
 
