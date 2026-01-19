@@ -5,6 +5,7 @@
 #include <string_view>
 #include <tuple>
 #include <vector>
+#include "argparse/argparse.hpp"
 
 #include "mpi_comm.hpp"
 #include "util.h"
@@ -122,16 +123,30 @@ void initConjugateGradientDistributed(tpe *__restrict__ u,
   if (is_top) {
     reqs.push_back(comm.isend(u_local, nx, below_rank, 0));
     reqs.push_back(comm.irecv(u, nx, below_rank, 0));
+
+    reqs.push_back(comm.isend(rhs_local, nx, below_rank, 0));
+    reqs.push_back(comm.irecv(rhs, nx, below_rank, 0));
   } else if (is_bottom) {
     reqs.push_back(
       comm.isend(u_local + (local_ny - 1) * nx, nx, above_rank, 0));
     reqs.push_back(comm.irecv(u_local + local_ny * nx, nx, above_rank, 0));
+
+    reqs.push_back(
+      comm.isend(rhs_local + (local_ny - 1) * nx, nx, above_rank, 0));
+    reqs.push_back(comm.irecv(rhs_local + local_ny * nx, nx, above_rank, 0));
   } else if (is_central) {
     reqs.push_back(comm.isend(u_local, nx, below_rank, 0));
     reqs.push_back(
       comm.isend(u_local + (local_ny - 1) * nx, nx, above_rank, 0));
     reqs.push_back(comm.irecv(u, nx, below_rank, 0));
     reqs.push_back(comm.irecv(u_local + local_ny * nx, nx, above_rank, 0));
+
+
+    reqs.push_back(comm.isend(rhs_local, nx, below_rank, 0));
+    reqs.push_back(
+      comm.isend(rhs_local + (local_ny - 1) * nx, nx, above_rank, 0));
+    reqs.push_back(comm.irecv(rhs, nx, below_rank, 0));
+    reqs.push_back(comm.irecv(rhs_local + local_ny * nx, nx, above_rank, 0));
   } else {
     fmt::print("something horrible is happening in init CG exiting program\n");
     std::exit(EXIT_FAILURE);
@@ -188,30 +203,53 @@ void checkSolutionConjugateGradientDistributed(tpe *__restrict__ u,
     fmt::print("  Final residual is {}", res);
 }
 
-inline std::tuple<std::string_view, size_t, size_t, size_t> parseCLA_2d(
+inline std::tuple<std::string, size_t, size_t, size_t> parseCLA_2d(
   int argc, char **argv) {
-  // default values
-  std::string_view tpeName;
-  size_t nx = 4096;
-  size_t ny = 4096;
+  argparse::ArgumentParser program("cg_solver");
 
-  size_t nIt = 200;
+  program.add_argument("tpeName")
+    .help("type name for the simulation")
+    .default_value("double")
+    .required();
 
-  // override with command line arguments
-  int i = 1;
-  if (argc > i)
-    tpeName = argv[i];
-  ++i;
-  if (argc > i)
-    nx = atoi(argv[i]);
-  ++i;
-  if (argc > i)
-    ny = atoi(argv[i]);
-  ++i;
-  if (argc > i)
-    nIt = atoi(argv[i]);
-  ++i;
+  program.add_argument("-x", "--nx")
+    .help("grid size in x dimension")
+    .default_value(size_t{4096})
+    .scan<'u', size_t>();
 
+  program.add_argument("-y", "--ny")
+    .help("grid size in y dimension")
+    .default_value(size_t{4096})
+    .scan<'u', size_t>();
+
+  program.add_argument("-n", "--nIt")
+    .help("number of iterations")
+    .default_value(size_t{200})
+    .scan<'u', size_t>();
+
+  program.add_argument("-h", "--help")
+    .help("print this help message")
+    .default_value(false)
+    .implicit_value(true);
+
+
+  try {
+    program.parse_args(argc, argv);
+  } catch (const std::exception &err) {
+    std::cerr << err.what() << std::endl;
+    std::cerr << program;
+    std::exit(1);
+  }
+
+  if (program.get<bool>("--help")) {
+    std::cout << program << std::endl;
+    std::exit(0);
+  }
+
+  std::string tpeName = program.get<std::string>("tpeName");
+  size_t nx = program.get<size_t>("--nx");
+  size_t ny = program.get<size_t>("--ny");
+  size_t nIt = program.get<size_t>("--nIt");
 
   return {tpeName, nx, ny, nIt};
 }

@@ -45,7 +45,8 @@ int main(int argc, char** argv) {
     
     // Distributed version
     auto local_ny = rows_in_rank(rank, size, ny);
-    size_t local_size = (local_ny + 2) * nx; // +2 for halo rows
+    auto local_ny_with_halo = chunk_rows_of_rank(rank, size, ny);
+    size_t local_size = local_ny_with_halo * nx;
     std::vector<double> u_dist(local_size);
     std::vector<double> rhs_dist(local_size);
     

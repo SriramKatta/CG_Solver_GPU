@@ -36,7 +36,13 @@ support can't be determined. Define SKIP_CUDA_AWARENESS_CHECK to skip this check
 
 struct mpienv {
   mpienv(int &argc, char **&argv) { MPI_CALL(MPI_Init(&argc, &argv)); }
-  ~mpienv() { MPI_CALL(MPI_Finalize()); }
+  ~mpienv() {
+    int flag;
+    MPI_CALL(MPI_Finalized(&flag));
+    if (!flag) {
+      MPI_CALL(MPI_Finalize());
+    }
+  }
 };
 
 template <typename VT>
@@ -133,7 +139,7 @@ class mpicommview {
 
   template <typename VT>
   request isend(const VT *sendbuff, size_t count, int send_to_rank,
-                    int sender_tag) {
+                int sender_tag) {
     auto type = mpitype<VT>::value();
     MPI_Request req;
     MPI_CALL(
@@ -142,7 +148,7 @@ class mpicommview {
   }
   template <typename VT>
   request irecv(VT *recvbuff, size_t count, int recv_from_rank,
-                    int recver_tag) {
+                int recver_tag) {
     auto type = mpitype<VT>::value();
     MPI_Request req;
     MPI_CALL(MPI_Irecv(recvbuff, count, type, recv_from_rank, recver_tag, comm_,

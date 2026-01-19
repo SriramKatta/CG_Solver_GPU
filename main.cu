@@ -12,7 +12,8 @@
 #define NCCL_USE 1
 
 template <typename VT>
-inline int realMain(int argc, char *argv[]) {
+inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
+                    size_t nIt) {
 
   auto world_comm = mpicomm::world();
   int world_rank = world_comm.rank();
@@ -55,8 +56,6 @@ inline int realMain(int argc, char *argv[]) {
 
 
   ncclcomm ncomm(localrank, localsize, ncclid);
-
-  auto [tpeName, nx, ny_global, nIt] = parseCLA_2d(argc, argv);
 
   auto chunk_size_with_halo =
     chunk_rows_of_rank(world_rank, world_size, ny_global);
@@ -121,28 +120,21 @@ inline int realMain(int argc, char *argv[]) {
                    15);
   }
 
-  checkSolutionConjugateGradientDistributed(u_host, rhs_host, nx, chunk_size_with_halo);
+  checkSolutionConjugateGradientDistributed(u_host, rhs_host, nx,
+                                            chunk_size_with_halo);
 
   return 0;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) try {
   mpienv env(argc, argv);
 
-  std::string_view tpeName;
-
-  if (argc < 2) {
-    fmt::print("Missing type specification using double");
-    return -1;
-  }
-
-  tpeName = argv[1];
-
+  auto [tpeName, nx, ny_global, nIt] = parseCLA_2d(argc, argv);
   if ("float" == tpeName)
-    return realMain<float>(argc, argv);
+    return realMain<float>(tpeName, nx, ny_global, nIt);
   if ("double" == tpeName)
-    return realMain<double>(argc, argv);
+    return realMain<double>(tpeName, nx, ny_global, nIt);
 
-  fmt::print("Invalid type specification ({})\n\tfloat, double", tpeName);
-  return -1;
+} catch (...) {
+  return EXIT_FAILURE;
 }
