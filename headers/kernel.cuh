@@ -181,6 +181,7 @@ void launch_resnormsqcalc(const VT *const __restrict__ res, size_t nx,
                           VT *ressqnorm, gcxx::StreamView sv,
                           ncclcommview ncomm) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
+  gcxx::memory::Memset(ressqnorm, 0, 1, sv);
   gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>,
                        res, res, ressqnorm, nx, ny);
   ncomm.allreduce(ressqnorm, ressqnorm, 1, ncclSum, sv.getRawStream());
@@ -265,8 +266,6 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
   gcxx::launch::Kernel(str1l, 1, 1, 0, gpu_devide<VT>, nextResSq, curResSq,
                        beta);
   gcxx::memory::Copy(curResSq, nextResSq, 1, str1l);
-  str1h.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
-  gcxx::memory::Memset(nextResSq, 0, 1, str1h);
   nvtxRangePop();
 
   // update p (stream 1 - depends on beta)
