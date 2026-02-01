@@ -6,6 +6,11 @@ module load cuda
 module load openmpi
 module load cmake 
 
+export http_proxy=http://proxy.nhr.fau.de:80
+export https_proxy=http://proxy.nhr.fau.de:80
+
+export CPM_SOURCE_CACHE=~/.cache/CPM/
+
 export NV_COMM_LIBS=$NVHPC_ROOT/Linux_x86_64/25.5/comm_libs
 #load nccl library 
 export NCCL_HOME=$NV_COMM_LIBS/nccl
