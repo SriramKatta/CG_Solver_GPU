@@ -44,19 +44,21 @@ __global__ void applystencil(const VT *const __restrict__ p,
 template <typename VT>
 void launch_apply_stencil(gcxx::StreamView str1l, gcxx::StreamView str1h,
                           dim3 numBlocks, dim3 blockSize, VT *__restrict__ &p,
-                          VT *__restrict__ &ap, size_t nx, size_t ny) {
+                          VT *__restrict__ &ap, size_t nx, size_t ny,
+                          VT *alphaden) {
   // needed since all streams are indepenedent  and may result in unconnected graph nodes
   str1h.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
+  gcxx::memory::Memset(alphaden, 0, 1, str1h);
 
   // external edges // to implement edge comm
-  gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
-                       nx, 0, 1);
-  gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
-                       nx, ny - 2, ny - 1);
+  // gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+  //                      nx, 0, 1);
+  // gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
+  //                      nx, ny - 2, ny - 1);
 
   // internal block
   gcxx::launch::Kernel(str1l, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
-                       nx, 1, ny - 2);
+                       nx, 0, ny - 1);
   str1l.WaitOnEvent(str1h.RecordEvent(gcxx::flags::eventCreate::disableTiming));
 }
 
@@ -179,7 +181,6 @@ void launch_resnormsqcalc(const VT *const __restrict__ res, size_t nx,
                           VT *ressqnorm, gcxx::StreamView sv,
                           ncclcommview ncomm) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
-  gcxx::memory::Memset(ressqnorm, 0, 1, sv);
   gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>,
                        res, res, ressqnorm, nx, ny);
   ncomm.allreduce(ressqnorm, ressqnorm, 1, ncclSum, sv.getRawStream());
@@ -192,7 +193,6 @@ void launch_alphacalc(const VT *const __restrict__ p,
                       VT *alphaden, VT *alpha, gcxx::StreamView sv,
                       ncclcommview ncomm) {
   size_t smemsize = blocksize.x * blocksize.y * sizeof(VT);
-  gcxx::memory::Memset(alphaden, 0, 1, sv);
   gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>, p,
                        ap, alphaden, nx, ny);
   ncomm.allreduce(alphaden, alphaden, 1, ncclSum, sv);
@@ -228,7 +228,8 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
   nvtx3::scoped_range range{"main_loop"};
   // compute A * p (stream 1)
   nvtxRangePushA("Ap");
-  launch_apply_stencil(str1l, str1h, numBlocks, blockSize, p, ap, nx, ny);
+  launch_apply_stencil(str1l, str1h, numBlocks, blockSize, p, ap, nx, ny,
+                       alphaden);
   nvtxRangePop();
 
   // alpha calculation depends on Ap (stream 1)
@@ -249,6 +250,7 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
   str3.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
   gcxx::launch::Kernel(str3, numBlocks, blockSize, 0, cgUpdateRes<VT>, ap, res,
                        alpha, nx, ny);
+
   nvtxRangePop();
 
   // compute residual norm (stream 3 - depends on residual update)
@@ -263,6 +265,8 @@ inline void core_CG(dim3 &numBlocks, dim3 &blockSize, VT *__restrict__ &p,
   gcxx::launch::Kernel(str1l, 1, 1, 0, gpu_devide<VT>, nextResSq, curResSq,
                        beta);
   gcxx::memory::Copy(curResSq, nextResSq, 1, str1l);
+  str1h.WaitOnEvent(str1l.RecordEvent(gcxx::flags::eventCreate::disableTiming));
+  gcxx::memory::Memset(nextResSq, 0, 1, str1h);
   nvtxRangePop();
 
   // update p (stream 1 - depends on beta)
@@ -341,6 +345,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
       gcxx::memory::Copy(&nextResSq_host, nextResSq, 1, str1l);
       auto graph = str1l.EndCapture();
+      graph.SaveDotfile("./test_move_memset_2.dot",
+                        gcxx::flags::graphDebugDot::Verbose);
       graphexec = graph.Instantiate();
       graph_is_built = true;
     }
