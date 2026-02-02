@@ -3,3 +3,6 @@ build
 
 *-rep
 *.sqlite
+
+.likwidscript*
+SLURM_OUT_FILES
