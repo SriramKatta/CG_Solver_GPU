@@ -344,8 +344,8 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
 
       gcxx::memory::Copy(&nextResSq_host, nextResSq, 1, str1l);
       auto graph = str1l.EndCapture();
-      graph.SaveDotfile("./test_move_memset_2.dot",
-                        gcxx::flags::graphDebugDot::KernelNodeParams);
+      // graph.SaveDotfile("./test_move_memset_2.dot",
+      //                   gcxx::flags::graphDebugDot::KernelNodeParams);
       graphexec = graph.Instantiate();
       graph_is_built = true;
     }

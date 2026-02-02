@@ -173,7 +173,7 @@ void checkSolutionConjugateGradient(const tpe *const __restrict__ u,
   }
 
   res = sqrt(res);
-  fmt::print("  Final residual is {}", res);
+  fmt::print("  Final residual is {}\n", res);
 }
 
 template <typename tpe>
@@ -200,7 +200,7 @@ void checkSolutionConjugateGradientDistributed(tpe *__restrict__ u,
   res = sqrt(res);
 
   if (world_comm.rank() == 0)
-    fmt::print("  Final residual is {}", res);
+    fmt::print("  Final residual is {}\n", res);
 }
 
 inline std::tuple<std::string, size_t, size_t, size_t, size_t, int> parseCLA_2d(
