@@ -119,6 +119,7 @@ inline int realMain(std::string_view tpeName, size_t nx, size_t ny_global,
 
   // check solution
   if (world_rank == 0) {
+    fmt::print("  Num GPU :      {} of {}\n", world_size, devcount);
     fmt::print("  CG steps:      {}\n", nIt);
     printStats<VT>(dur, nIt, nx * ny_global, tpeName, 8 * sizeof(VT), 15);
   }
@@ -140,5 +141,4 @@ int main(int argc, char *argv[]) {
     return realMain<float>(tpeName, nx, ny_global, nIt, ngraphsteps, verbose);
   if ("double" == tpeName)
     return realMain<double>(tpeName, nx, ny_global, nIt, ngraphsteps, verbose);
-
 }

@@ -56,9 +56,9 @@ void launch_apply_stencil(gcxx::StreamView str1l, gcxx::StreamView str1h,
   // gcxx::launch::Kernel(str1h, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
   //                      nx, ny - 2, ny - 1);
 
-  // internal block
+  // internal block - start at row 1 to avoid illegal memory access at boundary
   gcxx::launch::Kernel(str1l, numBlocks, blockSize, 0, applystencil<VT>, p, ap,
-                       nx, 0, ny - 1);
+                       nx, 1, ny - 1);
   str1l.WaitOnEvent(str1h.RecordEvent(gcxx::flags::eventCreate::disableTiming));
 }
 
@@ -184,7 +184,7 @@ void launch_resnormsqcalc(const VT *const __restrict__ res, size_t nx,
   gcxx::memory::Memset(ressqnorm, 0, 1, sv);
   gcxx::launch::Kernel(sv, numblocks, blocksize, smemsize, innerproduct<VT>,
                        res, res, ressqnorm, nx, ny);
-  ncomm.allreduce(ressqnorm, ressqnorm, 1, ncclSum, sv.getRawStream());
+  ncomm.allreduce(ressqnorm, ressqnorm, 1, ncclSum, sv);
 }
 
 template <typename VT>
@@ -345,7 +345,7 @@ inline size_t conjugateGradient(const VT *const __restrict__ rhs,
       gcxx::memory::Copy(&nextResSq_host, nextResSq, 1, str1l);
       auto graph = str1l.EndCapture();
       graph.SaveDotfile("./test_move_memset_2.dot",
-                        gcxx::flags::graphDebugDot::Verbose);
+                        gcxx::flags::graphDebugDot::KernelNodeParams);
       graphexec = graph.Instantiate();
       graph_is_built = true;
     }
