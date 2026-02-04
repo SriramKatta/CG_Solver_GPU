@@ -11,6 +11,8 @@ module load openmpi
 module load llvm
 module load cmake
 
+
+# to support compiling on compute node
 export http_proxy=http://proxy.nhr.fau.de:80
 export https_proxy=http://proxy.nhr.fau.de:80
 
@@ -37,7 +39,7 @@ BUILD_DIR="build"
 
 configure() {
     echo ">>> Configuring..."
-    cmake -S . -B "$BUILD_DIR"
+    CXX=g++;cmake -S . -B "$BUILD_DIR"
 }
 
 build() {
