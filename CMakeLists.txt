@@ -20,6 +20,7 @@ include(cmake/NCCL.cmake)
 include(cmake/NVTX.cmake)
 include(cmake/GCXX.cmake)
 include(cmake/FMT.cmake)
+include(cmake/format.cmake)
 include(cmake/argparse.cmake)
 find_package(MPI REQUIRED COMPONENTS CXX)
 

@@ -116,7 +116,7 @@ class ncclcommview {
  protected:
   ncclComm_t nccl_comm_{NCCL_COMM_NULL};
   ncclcommview() = default;
-  ncclcommview(ncclComm_t comm) : nccl_comm_(comm) {};
+  ncclcommview(ncclComm_t comm) : nccl_comm_(comm){};
 
  public:
   ncclComm_t get() { return nccl_comm_; }

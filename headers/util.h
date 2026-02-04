@@ -15,16 +15,14 @@
 
 
 template <typename tpe>
-void printStats(const double elapsedSeconds, size_t nIt,
-                size_t nCells, std::string_view tpeName, size_t numBytesPerCell,
+void printStats(const double elapsedSeconds, size_t nIt, size_t nCells,
+                std::string_view tpeName, size_t numBytesPerCell,
                 size_t numFlopsPerCell) {
   fmt::print("  #cells / #it:  {} / {}\n", nCells, nIt);
   fmt::print("  type:          {}\n", tpeName);
   fmt::print("  elapsed time:  {:.3f} ms\n", 1e3 * elapsedSeconds);
-  fmt::print("  per iteration: {:.3f} ms\n",
-             1e3 * elapsedSeconds / nIt);
-  fmt::print("  MLUP/s:        {:.3f}\n",
-             1e-6 * nCells * nIt / elapsedSeconds);
+  fmt::print("  per iteration: {:.3f} ms\n", 1e3 * elapsedSeconds / nIt);
+  fmt::print("  MLUP/s:        {:.3f}\n", 1e-6 * nCells * nIt / elapsedSeconds);
   fmt::print("  bandwidth:     {:.3f} GB/s\n",
              1e-9 * numBytesPerCell * nCells * nIt / elapsedSeconds);
   fmt::print("  compute:       {:.3f} GFLOP/s\n",

@@ -267,5 +267,5 @@ inline std::tuple<std::string, size_t, size_t, size_t, size_t, int> parseCLA_2d(
 
   //   );
 
-    return {tpeName, nx, ny, nIt, ngraphsteps, verbose};
+  return {tpeName, nx, ny, nIt, ngraphsteps, verbose};
 }
